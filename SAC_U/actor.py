@@ -7,7 +7,7 @@ import numpy as np
 
 class SacULearner(object):
     def __init__(self, environment, n_trajectories, max_steps, scheduler_period, state_shape, action_space, n_tasks,
-                 policy_model):
+                 policy_model, learner, parameter_server):
         """
         Initializes the learner
         :param n_trajectories: Number of trajectories to be collected before submitting to learner.
@@ -29,6 +29,8 @@ class SacULearner(object):
         self.state = tf.placeholder(tf.float32, state_shape)
         self.task_id = tf.placeholder(tf.int32)
         self.env = environment
+        self.learner = learner
+        self.parameter_server = parameter_server
         # Since this is SAC_U, there is no Q-table for scheduling
 
     def run(self):
@@ -63,9 +65,10 @@ class SacULearner(object):
                         s_new, rewards = self.env.step(a)
                         trajectory.append((s, a_i, rewards, action_dist))
 
-                # TODO: Send to Learner
+                self.send_trajectory(trajectory)
 
-    def sample_index(self, distribution):
+    @staticmethod
+    def sample_index(distribution):
         cum_prob = 0
         choice = np.random.random()
         for i, p in enumerate(distribution):
@@ -74,8 +77,21 @@ class SacULearner(object):
                 return i
 
         raise ValueError("Expected cumulative probability of 1, got %s. Failed to sample from distribution %s." % (
-        np.sum(distribution), distribution))
+            np.sum(distribution), distribution))
 
     def update_parameters(self, sess):
-        # TODO: Receive parameters from learner and update values
-        pass
+        """
+        Requests fresh parameters from the parameter server applies these new parameters
+        :param sess: The TensorFlow session
+        """
+        variable_map = self.parameter_server.get_parameters()
+
+        # Construct a "query" of reassignments to run on the session
+        query = []
+        for var in tf.trainable_variables("policy"):
+            if var.name in variable_map:
+                query.append(tf.assign(var.name, variable_map[var.name]))
+        sess.run(query)
+
+    def send_trajectory(self, trajectory):
+        self.learner.add_trajectory(trajectory)
