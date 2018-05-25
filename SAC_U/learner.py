@@ -9,7 +9,7 @@ import multiprocessing as mp
 
 class SacULearner(object):
     def __init__(self, parameter_server, policy_model, value_model, entropy_regularization, state_shape, action_space,
-                 n_tasks, learner_index, buffer_size=-1, training_iterations=-1):
+                 n_tasks, learner_index=-1, buffer_size=-1, training_iterations=-1):
 
         self.learner_index = learner_index
         self.parameter_server = parameter_server
@@ -42,6 +42,7 @@ class SacULearner(object):
                     policy_fixed = self.policy_model(self.task_id, self.state)
                 with tf.variable_scope("value"):
                     value_fixed = self.value_model(self.task_id, self.action, self.state)
+            parameters = policy, value, policy_fixed, value_fixed
             init = tf.global_variables_initializer()
             sess.run(init)
 
@@ -51,8 +52,8 @@ class SacULearner(object):
                 for k in range(1000):
                     trajectory = self.replay_buffer[np.random.randint(0, len(self.replay_buffer)-1)]
 
-                    delta_phi = self.get_delta_phi(trajectory, sess)
-                    delta_theta = self.get_delta_theta(trajectory, sess)
+                    delta_phi = self.get_delta_phi(trajectory, parameters, sess)
+                    delta_theta = self.get_delta_theta(trajectory, parameters, sess)
 
                     # The idea is that this will block until the parameter update is finished:
                     self.parameter_server.put_gradients(self.learner_index, delta_phi, delta_theta)
@@ -95,12 +96,14 @@ class SacULearner(object):
                     query.append(tf.assign(var.name, variable_map[var.name]))
         sess.run(query)
 
-    def get_delta_phi(self, trajectory, sess):
+    def get_delta_phi(self, trajectory, parameters, sess):
         # TODO: Generate the delta Phi
-        pass
+        # TODO: Make it a beautiful map
+        return dict()
 
-    def get_delta_theta(self, trajectory, sess):
+    def get_delta_theta(self, trajectory, parameters, sess):
         # TODO: Generate the delta Theta
-        pass
+        # TODO: Make it a beautiful map
+        return dict()
 
 
