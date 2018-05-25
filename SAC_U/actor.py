@@ -5,7 +5,7 @@ import tensorflow as tf
 import numpy as np
 
 
-class SacULearner(object):
+class SacUActor(object):
     def __init__(self, environment, n_trajectories, max_steps, scheduler_period, state_shape, action_space, n_tasks,
                  policy_model, learner, parameter_server):
         """
