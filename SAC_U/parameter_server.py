@@ -14,6 +14,7 @@ class SacUParameterServer(object):
         self.policy_model = policy_model
         self.learners = []
         self.learner_barriers = []
+        self.learner_waiting = []
         self.id = 0
         self.gradient_queue = mp.Queue()
 
@@ -33,6 +34,7 @@ class SacUParameterServer(object):
 
         # Add a barrier to hold the learner until parameters are updated
         self.learner_barriers.append(mp.Barrier(2))
+        self.learner_waiting.append(False)
 
     def run(self):
         with tf.Session() as sess:
@@ -76,9 +78,30 @@ class SacUParameterServer(object):
         return output
 
     def update_parameter_variable(self, sess):
-        # TODO: Implement. Should update parameter variable and unlock Learners
-        pass
+        vars = tf.trainable_variables()
+        vals = sess.run(tf.trainable_variables())
+
+        params = dict()
+        for var, val in zip(vars, vals):
+            params[var.name] = val
+        self.parameters = params
+
+        # Unlock the waiting learners
+        for barrier, waiting in zip(self.learner_barriers, self.learner_waiting):
+            if waiting:
+                barrier.wait()
 
     def get_gradients(self):
-        # TODO: Implement. Should return gradients from the queue and block if none are present
-        pass
+        return self.gradient_queue.get()
+
+    def put_gradients(self, index, delta_phi, delta_theta):
+        # This method will be executed by learners!
+        self.learner_waiting[index] = True
+        self.gradient_queue.put((delta_phi, delta_theta))
+
+        # The Learner thread will hold here until gradients are updated
+        self.learner_barriers[index].wait()
+
+        # The learner will now reset its status and resume learning
+        self.learner_barriers[index].reset()
+        self.learner_waiting[index] = False
