@@ -12,7 +12,8 @@ import multiprocessing as mp
 class SacU(object):
     def __init__(self, policy_model, value_model, environment_creator, state_shape, action_space, n_tasks, n_learners,
                  learning_rate=0.0001, averaged_gradients=None, entropy_regularization_factor=0.1, n_trajectories=4,
-                 max_steps = 4000, scheduler_period=150):
+                 max_steps = 4000, scheduler_period=150, buffer_size=-1):
+        self.buffer_size = buffer_size
         self.entropy_regularization_factor = entropy_regularization_factor
         self.n_tasks = n_tasks
         self.action_space = action_space
@@ -30,12 +31,13 @@ class SacU(object):
         self.actors = []
         for i in range(n_learners):
             learner = SacULearner(self.parameter_server, policy_model, value_model, entropy_regularization_factor,
-                                  state_shape, action_space, n_tasks)
+                                  state_shape, action_space, n_tasks, buffer_size=buffer_size)
             actor = SacUActor(environment_creator(), n_trajectories, max_steps, scheduler_period, state_shape, action_space,
                               n_tasks, policy_model, learner, self.parameter_server)
             self.actors.append(actor)
             self.learners.append(learner)
             self.parameter_server.add_learner(learner)
+            self.parameter_server.add_actor(actor)
 
     def run(self):
         processes = []
@@ -49,6 +51,7 @@ class SacU(object):
         try:
             self.parameter_server.run()
         except Exception:
+            # Main process killed, terminate all subprocess
             traceback.print_exc()
             for process in processes:
                 process.terminate()
@@ -70,5 +73,5 @@ if __name__ == "__main__":
 
 
     env = lambda: mock_env.MockEnv()
-    sac_u = SacU(policy_model, value_model, env, mock_env.state_shape, mock_env.action_space, mock_env.n_tasks, 2)
+    sac_u = SacU(policy_model, value_model, env, mock_env.state_shape, mock_env.action_space, mock_env.n_tasks, 2, buffer_size=10)
     sac_u.run()

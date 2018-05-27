@@ -67,6 +67,7 @@ class SacUActor(object):
                         trajectory.append((s, a_i, rewards, action_dist))
                     n += 1
 
+                print("Sending trajectory")
                 self.send_trajectory(trajectory)
 
     @staticmethod
@@ -98,7 +99,7 @@ class SacUActor(object):
         query = []
         for var in tf.trainable_variables("policy"):
             if var.name in variable_map:
-                query.append(tf.assign(var.name, variable_map[var.name]))
+                query.append(tf.assign(var, variable_map[var.name]))
         sess.run(query)
 
     def send_trajectory(self, trajectory):

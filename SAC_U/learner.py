@@ -24,7 +24,6 @@ class SacULearner(object):
         self.state_shape = state_shape
         self.action_space = action_space
         self.n_tasks = n_tasks
-        self.n_tasks = n_tasks
         self.state = tf.placeholder(tf.float32, (None,) + state_shape)
         self.task_id = tf.placeholder(tf.int32, (None,))
         self.action = tf.placeholder(tf.float32, shape=(None, len(action_space,)))
@@ -33,6 +32,7 @@ class SacULearner(object):
 
     def add_trajectory(self, trajectory):
         self.trajectory_queue.put(trajectory)
+        print(self.trajectory_queue.qsize())
 
     def run(self):
         with tf.Session() as sess:
@@ -57,10 +57,12 @@ class SacULearner(object):
                 self.update_replay_buffer()
                 time.sleep(0.1)
 
-            while n < self.n_tasks or self.n_tasks == -1:
+            while n < self.training_iterations or self.training_iterations == -1:
+                print("Updating replay buffer: ")
                 self.update_replay_buffer()
 
-                for k in range(1000):
+                # TODO: Reset this back to 1000 like the paper suggests. I found this annoying since the actors provided many new experiences that were never used
+                for k in range(100):
                     trajectory = self.replay_buffer[np.random.randint(0, len(self.replay_buffer)-1)]
 
                     delta_phi = self.get_delta_phi(trajectory, parameters, sess)
@@ -70,11 +72,13 @@ class SacULearner(object):
                     self.parameter_server.put_gradients(self.learner_index, delta_phi, delta_theta)
 
                     # Update the current parameters
-                    if k != 999:
+                    if k != 99:
                         self.update_local_parameters(sess, both=False)
 
                 # Update all parameters
+                print("Updating all parameters")
                 self.update_local_parameters(sess, both=True)
+                print("Done updating all variables")
 
                 n += 1
 
@@ -84,21 +88,26 @@ class SacULearner(object):
         return v
 
     def update_replay_buffer(self):
-        while not self.trajectory_queue.empty():
-            self.replay_buffer.append(self.trajectory_queue.get(0))
+        """
+        Updates the replay buffer with incoming replays from the actor
+        """
+        while self.trajectory_queue.qsize() > 0:
+            print("Queue not empty: receiving trajectories")
+            self.replay_buffer.append(self.trajectory_queue.get())
 
             # Remove the first trajectory if the buffer is full:
             print(self.buffer_size, len(self.replay_buffer))
             if self.buffer_size != -1 and len(self.replay_buffer) > self.buffer_size:
                 self.replay_buffer.pop(0)
+            print("Updated replay buffer, size: ", len(self.replay_buffer))
+        print(self.trajectory_queue.empty(), self.trajectory_queue.qsize())
 
     def calculate_Q_return(self, trajectory, i=0):
         # TODO: Implement
         pass
 
     def update_local_parameters(self, sess, both=False):
-        if self.parameter_queue.empty():
-            return
+
         variable_map = self.parameter_queue.get()
         while not self.parameter_queue.empty():
             variable_map = self.parameter_queue.get()

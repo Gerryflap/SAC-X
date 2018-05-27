@@ -20,8 +20,7 @@ class SacUParameterServer(object):
         self.state = tf.placeholder(tf.float32, (None,) + state_shape)
         self.task_id = tf.placeholder(tf.int32, (None,))
         self.action = tf.placeholder(tf.float32, shape=(None, len(action_space,)))
-        self.manager = mp.Manager()
-        self.parameters = self.manager.dict()
+        self.parameters = dict()
 
     def add_learner(self, learner):
         """
@@ -92,7 +91,7 @@ class SacUParameterServer(object):
         for var, val in zip(vars, vals):
             params[var.name] = val
         self.parameters = params
-        print(params)
+        #print(params)
 
         for actor in self.actors:
             actor.update_parameters(self.parameters)
