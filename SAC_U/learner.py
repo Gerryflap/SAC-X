@@ -2,6 +2,8 @@
     The Learner in the SAC-U algorithm collects trajectories in the replay memory and computes gradients
     from the replay memory. These gradients are then sent to a central parameter server.
 """
+import time
+
 import tensorflow as tf
 import numpy as np
 import multiprocessing as mp
@@ -22,10 +24,12 @@ class SacULearner(object):
         self.state_shape = state_shape
         self.action_space = action_space
         self.n_tasks = n_tasks
-        self.state = tf.placeholder(tf.float32, state_shape)
-        self.task_id = tf.placeholder(tf.int32)
-        self.action = tf.placeholder(tf.float32, shape=(len(action_space,)))
+        self.n_tasks = n_tasks
+        self.state = tf.placeholder(tf.float32, (None,) + state_shape)
+        self.task_id = tf.placeholder(tf.int32, (None,))
+        self.action = tf.placeholder(tf.float32, shape=(None, len(action_space,)))
         self.replay_buffer = []
+        self.parameter_queue = mp.Queue()
 
     def add_trajectory(self, trajectory):
         self.trajectory_queue.put(trajectory)
@@ -47,8 +51,15 @@ class SacULearner(object):
             sess.run(init)
 
             n = 0
+
+            # Wait until the first trajectories appear if the buffer is empty
+            while len(self.replay_buffer) <= 1:
+                self.update_replay_buffer()
+                time.sleep(0.1)
+
             while n < self.n_tasks or self.n_tasks == -1:
                 self.update_replay_buffer()
+
                 for k in range(1000):
                     trajectory = self.replay_buffer[np.random.randint(0, len(self.replay_buffer)-1)]
 
@@ -59,10 +70,11 @@ class SacULearner(object):
                     self.parameter_server.put_gradients(self.learner_index, delta_phi, delta_theta)
 
                     # Update the current parameters
-                    self.update_parameters(sess, both=False)
+                    if k != 999:
+                        self.update_local_parameters(sess, both=False)
 
                 # Update all parameters
-                self.update_parameters(sess, both=True)
+                self.update_local_parameters(sess, both=True)
 
                 n += 1
 
@@ -76,34 +88,57 @@ class SacULearner(object):
             self.replay_buffer.append(self.trajectory_queue.get(0))
 
             # Remove the first trajectory if the buffer is full:
+            print(self.buffer_size, len(self.replay_buffer))
             if self.buffer_size != -1 and len(self.replay_buffer) > self.buffer_size:
                 self.replay_buffer.pop(0)
 
     def calculate_Q_return(self, trajectory, i=0):
+        # TODO: Implement
         pass
 
-    def update_parameters(self, sess, both=False):
-        variable_map = self.parameter_server.get_parameters()
+    def update_local_parameters(self, sess, both=False):
+        if self.parameter_queue.empty():
+            return
+        variable_map = self.parameter_queue.get()
+        while not self.parameter_queue.empty():
+            variable_map = self.parameter_queue.get()
 
         # Construct a "query" of reassignments to run on the session
         query = []
         for var in tf.trainable_variables("current"):
             if var.name.replace("current/", "") in variable_map:
-                query.append(tf.assign(var.name, variable_map[var.name]))
+                query.append(tf.assign(var, variable_map[var.name.replace("current/", "")]))
         if both:
             for var in tf.trainable_variables("fixed"):
                 if var.name.replace("fixed/", "") in variable_map:
-                    query.append(tf.assign(var.name, variable_map[var.name]))
+                    query.append(tf.assign(var, variable_map[var.name.replace("fixed/", "")]))
         sess.run(query)
 
-    def get_delta_phi(self, trajectory, parameters, sess):
+    def get_delta_phi(self, trajectory, parameters, sess) -> dict:
         # TODO: Generate the delta Phi
-        # TODO: Make it a beautiful map
-        return dict()
+        # Stub implementation:
+        vars = tf.trainable_variables("current/value")
+        values = sess.run(vars)
 
-    def get_delta_theta(self, trajectory, parameters, sess):
+        ret = dict()
+        for var, val in zip(vars, values):
+            ret[var.name.replace("current/", "")] = val
+
+        return ret
+
+    def get_delta_theta(self, trajectory, parameters, sess) -> dict:
         # TODO: Generate the delta Theta
         # TODO: Make it a beautiful map
-        return dict()
 
+        vars = tf.trainable_variables("current/policy")
+        values = sess.run(vars)
+
+        ret = dict()
+        for var, val in zip(vars, values):
+            ret[var.name.replace("current/", "")] = val
+
+        return ret
+
+    def update_parameters(self, parameters):
+        self.parameter_queue.put(parameters)
 
