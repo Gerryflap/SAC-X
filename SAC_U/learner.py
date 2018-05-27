@@ -93,7 +93,8 @@ class SacULearner(object):
         """
         while self.trajectory_queue.qsize() > 0:
             print("Queue not empty: receiving trajectories")
-            self.replay_buffer.append(self.trajectory_queue.get())
+            trajectory = self.trajectory_queue.get()
+            self.replay_buffer.append(trajectory)
 
             # Remove the first trajectory if the buffer is full:
             print(self.buffer_size, len(self.replay_buffer))
@@ -139,14 +140,47 @@ class SacULearner(object):
         # TODO: Generate the delta Theta
         # TODO: Make it a beautiful map
 
-        vars = tf.trainable_variables("current/policy")
-        values = sess.run(vars)
+        policy, value, policy_fixed, value_fixed = parameters
 
-        ret = dict()
-        for var, val in zip(vars, values):
-            ret[var.name.replace("current/", "")] = val
+        states = np.stack([event[0] for event in trajectory[:]], axis=0)
+        # print("States: ", states)
+        task_ids = list(range(self.n_tasks))
+        values = np.zeros((self.n_tasks, len(states), len(self.action_space)))
 
-        return ret
+        for task_id in task_ids:
+            for action in range(len(self.action_space)):
+                tasks = np.array([task_id] * states.shape[0])
+                actions = np.repeat(np.expand_dims(self.action_to_one_hot(action), axis=0), states.shape[0], axis=0)
+
+                values[task_id, :, action] = np.reshape(sess.run(value, feed_dict=
+                {
+                    self.state: states,
+                    self.task_id: tasks,
+                    self.action: actions
+                }), (-1,))
+        print(values)
+        gradient_dict = dict()
+        for task_id in range(self.n_tasks):
+            task_policy_score = tf.reduce_sum(policy * values[task_id] + self.entropy_regularization * tf.log(policy))
+            query = []
+            keys = []
+            for variable in tf.trainable_variables("current/policy"):
+                query.append(tf.gradients(task_policy_score, variable))
+                keys.append(variable.name.replace("current/", ""))
+            gradients = sess.run(
+                query,
+                feed_dict={
+                    self.state: states,
+                    self.task_id: np.array([task_id]*states.shape[0])
+                })
+
+            for key, grad in zip(keys, gradients):
+                if key in gradient_dict:
+                    gradient_dict[key] += grad[0]
+                else:
+                    gradient_dict[key] = grad[0]
+        print(gradient_dict)
+        return gradient_dict
 
     def update_parameters(self, parameters):
         self.parameter_queue.put(parameters)

@@ -69,9 +69,9 @@ if __name__ == "__main__":
     def value_model(t_id, action, x):
         x = tf.concat([x, action], axis=1)
         x = ks.layers.Dense(10, activation='elu')(x)
-        return ks.layers.Dense(len(mock_env.action_space), activation='linear')(x)
+        return ks.layers.Dense(1, activation='linear')(x)
 
 
     env = lambda: mock_env.MockEnv()
-    sac_u = SacU(policy_model, value_model, env, mock_env.state_shape, mock_env.action_space, mock_env.n_tasks, 2, buffer_size=10)
+    sac_u = SacU(policy_model, value_model, env, mock_env.state_shape, mock_env.action_space, mock_env.n_tasks, 2, buffer_size=1000)
     sac_u.run()

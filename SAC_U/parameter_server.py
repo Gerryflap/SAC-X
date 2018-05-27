@@ -42,7 +42,10 @@ class SacUParameterServer(object):
                 value = self.value_model(self.task_id, self.action, self.state)
 
             optimizer = tf.train.AdamOptimizer(self.learning_rate)
-            _ = optimizer.apply_gradients(optimizer.compute_gradients(tf.concat([policy, value], axis=0), tf.trainable_variables()))
+
+            # Apparently this is necessary to initialize Adam:
+            _ = optimizer.apply_gradients(optimizer.compute_gradients(policy, tf.trainable_variables()))
+            _ = optimizer.apply_gradients(optimizer.compute_gradients(value, tf.trainable_variables()))
             init = tf.global_variables_initializer()
             sess.run(init)
             self.update_parameter_variable(sess)

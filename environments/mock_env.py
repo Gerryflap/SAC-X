@@ -10,8 +10,8 @@ class MockEnv(object):
         pass
 
     def reset(self):
-        return np.zeros(state_shape)
+        return np.random.normal(0, 1, state_shape)
 
     def step(self, action):
-        return np.zeros(state_shape), np.random.normal(0, 1, (n_tasks,))
+        return np.random.normal(0, 1, state_shape), np.random.normal(0, 1, (n_tasks,))
 

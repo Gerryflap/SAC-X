@@ -65,6 +65,7 @@ class SacUActor(object):
                         # Here we assume that the environment will provide the rewards:
                         s_new, rewards = self.env.step(a)
                         trajectory.append((s, a_i, rewards, action_dist))
+                        s = s_new
                     n += 1
 
                 print("Sending trajectory")
