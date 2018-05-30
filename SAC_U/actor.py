@@ -76,6 +76,8 @@ class SacUActor(object):
                         s = s_new
                         if self.env.terminated:
                             break
+                    if self.env.terminated:
+                        break
                     n += 1
 
                 if not self.visual:

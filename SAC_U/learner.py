@@ -20,7 +20,7 @@ class SacULearner(object):
         self.entropy_regularization = entropy_regularization
         self.buffer_size = buffer_size
         self.training_iterations = training_iterations
-        self.trajectory_queue = mp.Queue()
+        self.trajectory_queue = mp.Queue(100)
         self.state_shape = state_shape
         self.action_space = action_space
         self.n_tasks = n_tasks

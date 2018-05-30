@@ -68,7 +68,7 @@ if __name__ == "__main__":
     def policy_model(t_id, x):
         x = ks.layers.Dense(100, activation='elu')(x)
         x = ks.layers.Dense(100, activation='elu')(x)
-        return ks.layers.Dense(4, activation=ks.activations.softmax)(x)
+        return ks.layers.Dense(2, activation=ks.activations.softmax)(x)
 
 
     def value_model(t_id, action, x):
@@ -78,6 +78,6 @@ if __name__ == "__main__":
         return ks.layers.Dense(1, activation='linear')(x)
 
 
-    env = lambda: wenv.GymEnvWrapper(gym.make('LunarLander-v2'), lambda s, a, r: np.array([r]), 1)
-    sac_u = SacU(policy_model, value_model, env, (8,), [0,1,2,3], 1, 10, buffer_size=10000, visual=True)
+    env = lambda: wenv.GymEnvWrapper(gym.make('CartPole-v0'), lambda s, a, r: np.array([r]), 1)
+    sac_u = SacU(policy_model, value_model, env, (4,), [0,1], 1, 4, buffer_size=10000, visual=True, averaged_gradients=1, learning_rate=0.0001, entropy_regularization_factor=0.001)
     sac_u.run()
