@@ -166,7 +166,7 @@ class SacULearner(object):
             rewards = np.array([experience[2][task_id] for experience in trajectory])
 
             q_ret = 0
-            for j in range(min(500, len(trajectory))):
+            for j in range(len(trajectory)):
                 # TODO: Use DYNAMIC PROGRAMMING to make this more efficient
                 c_prod = np.prod(c[:j])
                 #print(c_prod, c[:j])
