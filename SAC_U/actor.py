@@ -7,7 +7,7 @@ import multiprocessing as mp
 
 class SacUActor(object):
     def __init__(self, environment, n_trajectories, max_steps, scheduler_period, state_shape, action_space, n_tasks,
-                 policy_model, learner, parameter_server):
+                 policy_model, learner, parameter_server, visual=False):
         """
         Initializes the learner
         :param n_trajectories: Number of trajectories to be collected before submitting to learner.
@@ -32,6 +32,9 @@ class SacUActor(object):
         self.learner = learner
         self.parameter_server = parameter_server
         self.parameter_queue = mp.Queue()
+        self.visual = visual
+        if visual:
+            self.env.set_rendering(True)
         # Since this is SAC_U, there is no Q-table for scheduling
 
     def run(self):
@@ -47,6 +50,7 @@ class SacUActor(object):
                 task_id = None
                 s = self.env.reset()
                 trajectory = []
+                score = None
                 while n < self.n_trajectories:
                     self.update_local_parameters(sess)
 
@@ -64,12 +68,19 @@ class SacUActor(object):
 
                         # Here we assume that the environment will provide the rewards:
                         s_new, rewards = self.env.step(a)
-                        trajectory.append((s, a_i, rewards, action_dist))
+                        if score is None:
+                            score = rewards
+                        else:
+                            score += rewards
+                        trajectory.append((s, a_i, rewards, action_dist, task_id))
                         s = s_new
+                        if self.env.terminated:
+                            break
                     n += 1
 
-                print("Sending trajectory")
-                self.send_trajectory(trajectory)
+                if not self.visual:
+                    print("Sending trajectory of length", len(trajectory), "with score ", score)
+                    self.send_trajectory(trajectory)
 
     @staticmethod
     def sample_index(distribution):
