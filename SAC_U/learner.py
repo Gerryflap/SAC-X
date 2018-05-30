@@ -20,7 +20,7 @@ class SacULearner(object):
         self.entropy_regularization = entropy_regularization
         self.buffer_size = buffer_size
         self.training_iterations = training_iterations
-        self.trajectory_queue = mp.Queue(100)
+        self.trajectory_queue = mp.Queue(500)
         self.state_shape = state_shape
         self.action_space = action_space
         self.n_tasks = n_tasks
@@ -143,6 +143,7 @@ class SacULearner(object):
                 self.state: [initial_experience[0]]*len(self.action_space),
                 self.action: list([self.action_to_one_hot(a) for a in self.action_space])
             })
+            print(q_values)
             q_values = np.reshape(q_values, (-1,))
             # The expected value of Q(s_i, . , T) over the policy distribution for s_i
             avg_q_si = np.sum(action_probabilities*q_values)
@@ -166,9 +167,9 @@ class SacULearner(object):
             rewards = np.array([experience[2][task_id] for experience in trajectory])
 
             q_ret = 0
+            c_prod = 1
             for j in range(len(trajectory)):
-                # TODO: Use DYNAMIC PROGRAMMING to make this more efficient
-                c_prod = np.prod(c[:j])
+                c_prod *= c[j]
                 #print(c_prod, c[:j])
                 q_ret = (self.gamma**j) * c_prod * (rewards[j] + q_deltas[j])
             q_rets.append(q_ret)
@@ -222,7 +223,7 @@ class SacULearner(object):
             query = []
             keys = []
             for variable in tf.trainable_variables("current/policy"):
-                query.append(tf.gradients(task_policy_score, variable))
+                query.append(tf.gradients(-task_policy_score, variable))
                 keys.append(variable.name.replace("current/", ""))
             gradients = sess.run(
                 query,

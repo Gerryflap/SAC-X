@@ -66,18 +66,24 @@ if __name__ == "__main__":
     import numpy as np
 
     def policy_model(t_id, x):
-        x = ks.layers.Dense(100, activation='elu')(x)
-        x = ks.layers.Dense(100, activation='elu')(x)
-        return ks.layers.Dense(2, activation=ks.activations.softmax)(x)
+        one_hot = tf.one_hot(t_id, 4)
+        x = tf.concat([x, one_hot], axis=1)
+        x = ks.layers.Dense(40, activation='elu')(x)
+        x = ks.layers.Dense(20, activation='elu')(x)
+        x = ks.layers.Dense(2, activation='softmax')(x)
+        return x
 
 
     def value_model(t_id, action, x):
-        x = tf.concat([x, action], axis=1)
-        x = ks.layers.Dense(100, activation='elu')(x)
-        x = ks.layers.Dense(100, activation='elu')(x)
-        return ks.layers.Dense(1, activation='linear')(x)
+        one_hot = tf.one_hot(t_id, 4)
+        x = tf.concat([x, action, one_hot], axis=1)
+        x = ks.layers.Dense(40, activation='elu')(x)
+        x = ks.layers.Dense(20, activation='elu')(x)
+        x = ks.layers.Dense(1, activation='linear')(x)
+        return x
 
 
-    env = lambda: wenv.GymEnvWrapper(gym.make('CartPole-v0'), lambda s, a, r: np.array([r]), 1)
-    sac_u = SacU(policy_model, value_model, env, (4,), [0,1], 1, 4, buffer_size=10000, visual=True, averaged_gradients=1, learning_rate=0.0001, entropy_regularization_factor=0.001)
+
+    env = lambda: wenv.GymEnvWrapper(gym.make('MountainCar-v0'), lambda s, a, r: np.array([r/100, np.abs(s[1]), 0.01 if s[1]>0 else 0, 0.01 if s[1]<0 else 0]), 4)
+    sac_u = SacU(policy_model, value_model, env, (2,), [0,1], 1, 6, buffer_size=1000, visual=True, averaged_gradients=1, learning_rate=0.0001, entropy_regularization_factor=1, scheduler_period=100)
     sac_u.run()
