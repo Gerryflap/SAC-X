@@ -15,7 +15,7 @@ class SacUParameterServer(object):
         self.actors = []
         self.learners = []
         self.id = 0
-        self.gradient_queue = mp.Queue()
+        self.gradient_queue = mp.Queue(gradients_to_average*2)
 
         self.state = tf.placeholder(tf.float32, (None,) + state_shape)
         self.task_id = tf.placeholder(tf.int32, (None,))
@@ -43,6 +43,7 @@ class SacUParameterServer(object):
 
             optimizer = tf.train.AdamOptimizer(self.learning_rate)
 
+
             # Apparently this is necessary to initialize Adam:
             _ = optimizer.apply_gradients(optimizer.compute_gradients(policy, tf.trainable_variables()))
             _ = optimizer.apply_gradients(optimizer.compute_gradients(value, tf.trainable_variables()))
@@ -57,6 +58,7 @@ class SacUParameterServer(object):
                     d_theta.append(delta_theta)
                     d_phi.append(delta_phi)
                     n += 1
+                # TODO: Move these operations
                 sess.run([
                     optimizer.apply_gradients(self.get_grads(d_phi)),
                     optimizer.apply_gradients(self.get_grads(d_theta))
@@ -109,5 +111,6 @@ class SacUParameterServer(object):
     def put_gradients(self, index, delta_phi, delta_theta):
         # This method will be executed by learners!
         self.gradient_queue.put((delta_phi, delta_theta))
+        print("Gradient queue size: ", self.gradient_queue.qsize())
 
 

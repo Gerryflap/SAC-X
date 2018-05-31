@@ -4,6 +4,7 @@
 import tensorflow as tf
 import numpy as np
 import multiprocessing as mp
+import matplotlib.pyplot as plt
 
 class SacUActor(object):
     def __init__(self, environment, n_trajectories, max_steps, scheduler_period, state_shape, action_space, n_tasks,
@@ -35,6 +36,8 @@ class SacUActor(object):
         self.visual = visual
         if visual:
             self.env.set_rendering(True)
+            self.entropies = []
+            self.scores = []
         # Since this is SAC_U, there is no Q-table for scheduling
 
     def run(self):
@@ -81,8 +84,10 @@ class SacUActor(object):
                     n += 1
 
                 if not self.visual:
-                    print("Sending trajectory of length", len(trajectory), "with score ", score)
+                    #print("Sending trajectory of length", len(trajectory), "with score ", score)
                     self.send_trajectory(trajectory)
+                else:
+                    self._visualize_trajectory(trajectory)
 
     @staticmethod
     def sample_index(distribution):
@@ -121,3 +126,13 @@ class SacUActor(object):
 
     def update_parameters(self, parameters):
         self.parameter_queue.put(parameters)
+
+    def _visualize_trajectory(self, trajectory):
+        entropy = np.average([step[3] * -np.log(step[3]) for step in trajectory])
+        score = np.sum([step[2][0] for step in trajectory])
+        self.scores.append(score)
+        self.entropies.append(entropy)
+        plt.plot(self.scores, color='red')
+        plt.plot(self.entropies, color='blue')
+        plt.pause(0.05)
+

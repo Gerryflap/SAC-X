@@ -30,10 +30,15 @@ class SacULearner(object):
         self.replay_buffer = []
         self.parameter_queue = mp.Queue()
         self.gamma = gamma
+        self.task_policy_score = None
+        self.values_t = None
+        self.q_loss_t = None
+        self.q_loss_grads = None
+        self.q_rets_t = None
+        self.policy_grad = None
 
     def add_trajectory(self, trajectory):
         self.trajectory_queue.put(trajectory)
-        print(self.trajectory_queue.qsize())
 
     def run(self):
         with tf.Session() as sess:
@@ -48,6 +53,14 @@ class SacULearner(object):
                 with tf.variable_scope("value"):
                     value_fixed = self.value_model(self.task_id, self.action, self.state)
             parameters = policy, value, policy_fixed, value_fixed
+
+            self.values_t = tf.placeholder(tf.float32, (None, len(self.action_space)))
+            self.task_policy_score = tf.reduce_sum(policy * (self.values_t - self.entropy_regularization * tf.log(policy)))
+            self.q_rets_t = tf.placeholder(tf.float32, (None, 1))
+            self.q_loss_t = tf.reduce_sum(np.square(value - self.q_rets_t))
+            self.q_loss_grads = tf.gradients(self.q_loss_t, tf.trainable_variables("current/value"))
+            self.policy_grad = tf.gradients(self.task_policy_score, tf.trainable_variables("current/policy"))
+
             init = tf.global_variables_initializer()
             sess.run(init)
 
@@ -62,11 +75,11 @@ class SacULearner(object):
                 print("Updating replay buffer: ")
                 self.update_replay_buffer()
 
-                # TODO: Reset this back to 1000 like the paper suggests. I found this annoying since the actors provided many new experiences that were never used
-                for k in range(10):
+                # TODO: Put this back to 1000
+                for k in range(100):
                     trajectory = self.replay_buffer[np.random.randint(0, len(self.replay_buffer)-1)]
 
-                    # To generate a random s_i, we shorten the trajactory randomly.
+                    # To generate a random s_i, we shorten the trajectory randomly.
                     # This is not done explicitly in the paper
                     trajectory = trajectory[np.random.randint(0, len(trajectory)-1):]
 
@@ -77,7 +90,7 @@ class SacULearner(object):
                     self.parameter_server.put_gradients(self.learner_index, delta_phi, delta_theta)
 
                     # Update the current parameters
-                    if k != 9:
+                    if k != 99:
                         self.update_local_parameters(sess, both=False)
 
                 # Update all parameters
@@ -126,8 +139,6 @@ class SacULearner(object):
         sess.run(query)
 
     def get_delta_phi(self, trajectory, parameters, sess) -> dict:
-        # TODO: Generate the delta Phi
-        # Stub implementation:
 
         policy, value, policy_fixed, value_fixed = parameters
         q_rets = []
@@ -173,20 +184,16 @@ class SacULearner(object):
                 #print(c_prod, c[:j])
                 q_ret = (self.gamma**j) * c_prod * (rewards[j] + q_deltas[j])
             q_rets.append(q_ret)
+
         q_rets = np.array(q_rets)
-        q_rets = np.expand_dims(q_rets, axis=1)
 
-        q_loss = tf.reduce_sum(np.square(value - q_rets))
-        #print(q_rets)
-
-        #print("Calculating gradients:")
-        gradients = sess.run(tf.gradients(q_loss, tf.trainable_variables("current/value")),
+        gradients = sess.run(self.q_loss_grads,
                              feed_dict={
                                  self.task_id: list(range(self.n_tasks)),
                                  self.state: [initial_experience[0]]*self.n_tasks,
-                                 self.action: [self.action_to_one_hot(initial_experience[1])]*self.n_tasks
+                                 self.action: [self.action_to_one_hot(initial_experience[1])]*self.n_tasks,
+                                 self.q_rets_t: q_rets
                              })
-
         vars = tf.trainable_variables("current/value")
         values = gradients
 
@@ -219,25 +226,24 @@ class SacULearner(object):
                 }), (-1,))
         gradient_dict = dict()
         for task_id in range(self.n_tasks):
-            task_policy_score = tf.reduce_sum(policy * (values[task_id] + self.entropy_regularization * tf.log(policy)))
             query = []
             keys = []
+            # TODO: Change the gradient calculation and move it out of here
             for variable in tf.trainable_variables("current/policy"):
-                query.append(tf.gradients(-task_policy_score, variable))
                 keys.append(variable.name.replace("current/", ""))
             gradients = sess.run(
-                query,
+                self.policy_grad,
                 feed_dict={
                     self.state: states,
-                    self.task_id: np.array([task_id]*states.shape[0])
+                    self.task_id: np.array([task_id]*states.shape[0]),
+                    self.values_t: values[task_id]
                 })
 
             for key, grad in zip(keys, gradients):
                 if key in gradient_dict:
-                    gradient_dict[key] += grad[0]
+                    gradient_dict[key] += grad
                 else:
-                    gradient_dict[key] = grad[0]
-
+                    gradient_dict[key] = grad
         return gradient_dict
 
     def update_parameters(self, parameters):
