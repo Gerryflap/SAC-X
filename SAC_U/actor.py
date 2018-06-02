@@ -38,6 +38,7 @@ class SacUActor(object):
             self.env.set_rendering(True)
             self.entropies = []
             self.scores = []
+        self.assigns = dict()
         # Since this is SAC_U, there is no Q-table for scheduling
 
     def run(self):
@@ -47,6 +48,11 @@ class SacUActor(object):
                 policy = self.policy_model(self.task_id, self.state)
             init = tf.global_variables_initializer()
             sess.run(init)
+            for var in tf.trainable_variables():
+                placeholder = tf.placeholder(tf.float32, var.shape)
+                self.assigns[var] = (tf.assign(var, placeholder), placeholder)
+            print(self.assigns)
+
             while True:
                 # Keep working indefinitely
                 n = 0
@@ -116,10 +122,13 @@ class SacUActor(object):
 
         # Construct a "query" of reassignments to run on the session
         query = []
-        for var in tf.trainable_variables("policy"):
+        feed_dict = dict()
+        for var in self.assigns.keys():
             if var.name in variable_map:
-                query.append(tf.assign(var, variable_map[var.name]))
-        sess.run(query)
+                assign_op, placeholder = self.assigns[var]
+                query.append(assign_op)
+                feed_dict[placeholder] = variable_map[var.name]
+        sess.run(query, feed_dict=feed_dict)
 
     def send_trajectory(self, trajectory):
         self.learner.add_trajectory(trajectory)
@@ -128,7 +137,7 @@ class SacUActor(object):
         self.parameter_queue.put(parameters)
 
     def _visualize_trajectory(self, trajectory):
-        entropy = np.average([step[3] * -np.log(step[3]) for step in trajectory])
+        entropy = np.average([np.sum(step[3] * -np.log(step[3])) for step in trajectory])
         score = np.sum([step[2][0] for step in trajectory])
         self.scores.append(score)
         self.entropies.append(entropy)

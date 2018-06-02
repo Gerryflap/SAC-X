@@ -36,6 +36,7 @@ class SacULearner(object):
         self.q_loss_grads = None
         self.q_rets_t = None
         self.policy_grad = None
+        self.assigns = dict()
 
     def add_trajectory(self, trajectory):
         self.trajectory_queue.put(trajectory)
@@ -55,11 +56,15 @@ class SacULearner(object):
             parameters = policy, value, policy_fixed, value_fixed
 
             self.values_t = tf.placeholder(tf.float32, (None, len(self.action_space)))
-            self.task_policy_score = tf.reduce_sum(policy * (self.values_t - self.entropy_regularization * tf.log(policy)))
+            self.task_policy_score = -tf.reduce_sum(policy * (self.values_t - self.entropy_regularization * tf.log(policy)))
             self.q_rets_t = tf.placeholder(tf.float32, (None, 1))
             self.q_loss_t = tf.reduce_sum(np.square(value - self.q_rets_t))
             self.q_loss_grads = tf.gradients(self.q_loss_t, tf.trainable_variables("current/value"))
             self.policy_grad = tf.gradients(self.task_policy_score, tf.trainable_variables("current/policy"))
+
+            for var in tf.trainable_variables():
+                placeholder = tf.placeholder(tf.float32, var.shape)
+                self.assigns[var] = (tf.assign(var, placeholder), placeholder)
 
             init = tf.global_variables_initializer()
             sess.run(init)
@@ -128,15 +133,21 @@ class SacULearner(object):
             variable_map = self.parameter_queue.get()
 
         # Construct a "query" of reassignments to run on the session
+        feed_dict = dict()
         query = []
-        for var in tf.trainable_variables("current"):
+        for var in self.assigns.keys():
             if var.name.replace("current/", "") in variable_map:
-                query.append(tf.assign(var, variable_map[var.name.replace("current/", "")]))
+                assign_op, placeholder= self.assigns[var]
+                query.append(assign_op)
+                feed_dict[placeholder] = variable_map[var.name.replace("current/", "")]
+                #query.append(tf.assign(var, variable_map[var.name.replace("current/", "")]))
         if both:
-            for var in tf.trainable_variables("fixed"):
+            for var in self.assigns.keys():
                 if var.name.replace("fixed/", "") in variable_map:
-                    query.append(tf.assign(var, variable_map[var.name.replace("fixed/", "")]))
-        sess.run(query)
+                    assign_op, placeholder = self.assigns[var]
+                    query.append(assign_op)
+                    feed_dict[placeholder] = variable_map[var.name.replace("fixed/", "")]
+        sess.run(query, feed_dict=feed_dict)
 
     def get_delta_phi(self, trajectory, parameters, sess) -> dict:
 
@@ -154,7 +165,6 @@ class SacULearner(object):
                 self.state: [initial_experience[0]]*len(self.action_space),
                 self.action: list([self.action_to_one_hot(a) for a in self.action_space])
             })
-            print(q_values)
             q_values = np.reshape(q_values, (-1,))
             # The expected value of Q(s_i, . , T) over the policy distribution for s_i
             avg_q_si = np.sum(action_probabilities*q_values)
@@ -182,18 +192,22 @@ class SacULearner(object):
             for j in range(len(trajectory)):
                 c_prod *= c[j]
                 #print(c_prod, c[:j])
-                q_ret = (self.gamma**j) * c_prod * (rewards[j] + q_deltas[j])
+                q_ret += (self.gamma**j) * c_prod * (rewards[j] + q_deltas[j])
+            # TODO: Remove MC:
+            #q_ret = [np.sum(rewards)]
             q_rets.append(q_ret)
 
         q_rets = np.array(q_rets)
 
-        gradients = sess.run(self.q_loss_grads,
+        gradients, q_loss, value_v = sess.run((self.q_loss_grads, self.q_loss_t, value),
                              feed_dict={
                                  self.task_id: list(range(self.n_tasks)),
                                  self.state: [initial_experience[0]]*self.n_tasks,
                                  self.action: [self.action_to_one_hot(initial_experience[1])]*self.n_tasks,
                                  self.q_rets_t: q_rets
                              })
+        #print("Values, returns: ", value_v, q_rets)
+        #print("Q-loss: ", q_loss)
         vars = tf.trainable_variables("current/value")
         values = gradients
 

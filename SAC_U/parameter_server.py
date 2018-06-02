@@ -43,10 +43,14 @@ class SacUParameterServer(object):
 
             optimizer = tf.train.AdamOptimizer(self.learning_rate)
 
+            grad_dict = dict()
+            for var in tf.trainable_variables():
+                grad_dict[var] = tf.placeholder(tf.float32, var.shape)
+            grad_list = list([(placeholder, var) for var, placeholder in grad_dict.items()])
+
 
             # Apparently this is necessary to initialize Adam:
-            _ = optimizer.apply_gradients(optimizer.compute_gradients(policy, tf.trainable_variables()))
-            _ = optimizer.apply_gradients(optimizer.compute_gradients(value, tf.trainable_variables()))
+            optimize_op = optimizer.apply_gradients(grad_list)
             init = tf.global_variables_initializer()
             sess.run(init)
             self.update_parameter_variable(sess)
@@ -54,15 +58,19 @@ class SacUParameterServer(object):
                 n = 0
                 d_theta, d_phi = [], []
                 while n < self.gradients_to_average:
-                    delta_theta, delta_phi = self.get_gradients()
+                    delta_phi, delta_theta = self.get_gradients()
                     d_theta.append(delta_theta)
                     d_phi.append(delta_phi)
                     n += 1
-                # TODO: Move these operations
+
+                feed_dict = dict()
+                for grads, var in self.get_grads(d_phi) + self.get_grads(d_theta):
+                    feed_dict[grad_dict[var]] = grads
+
                 sess.run([
-                    optimizer.apply_gradients(self.get_grads(d_phi)),
-                    optimizer.apply_gradients(self.get_grads(d_theta))
-                ])
+                    optimize_op
+                ], feed_dict=feed_dict)
+
 
                 self.update_parameter_variable(sess)
 
@@ -111,6 +119,5 @@ class SacUParameterServer(object):
     def put_gradients(self, index, delta_phi, delta_theta):
         # This method will be executed by learners!
         self.gradient_queue.put((delta_phi, delta_theta))
-        print("Gradient queue size: ", self.gradient_queue.qsize())
 
 

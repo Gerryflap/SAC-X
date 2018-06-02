@@ -109,5 +109,5 @@ if __name__ == "__main__":
 
 
     env = lambda: wenv.GymEnvWrapper(gym.make('CartPole-v0'), lambda s, a, r: np.array([r/100]), 1)
-    sac_u = SacU(policy_model2, value_model2, env, (4,), [0,1], 1, 1, buffer_size=10000, visual=True, averaged_gradients=1, learning_rate=0.0003, entropy_regularization_factor=0.3, scheduler_period=200)
+    sac_u = SacU(policy_model2, value_model2, env, (4,), [0,1], 1, 32, buffer_size=100, visual=True, averaged_gradients=32, learning_rate=0.0002, entropy_regularization_factor=0.01, scheduler_period=200)
     sac_u.run()

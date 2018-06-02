@@ -7,11 +7,13 @@ action_space = [0,1,2]
 
 class MockEnv(object):
     def __init__(self):
-        pass
+        self.terminated = False
 
     def reset(self):
         return np.random.normal(0, 1, state_shape)
 
     def step(self, action):
-        return np.random.normal(0, 1, state_shape), np.random.normal(0, 1, (n_tasks,))
+        rewards = np.zeros((n_tasks, ))
+        rewards[action] = 0.001
+        return np.random.normal(0, 1, state_shape), rewards
 
