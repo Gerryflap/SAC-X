@@ -72,8 +72,12 @@ class SacUActor(object):
                             policy,
                             feed_dict={self.state: np.expand_dims(s, axis=0), self.task_id: np.array([task_id])}
                         )[0]
+
                         a_i = self.sample_index(action_dist)
                         a = self.action_space[a_i]
+
+                        if t%100 == 0:
+                            print(task_id, action_dist)
 
                         # Here we assume that the environment will provide the rewards:
                         s_new, rewards = self.env.step(a)

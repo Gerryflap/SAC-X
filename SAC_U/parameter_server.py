@@ -94,6 +94,7 @@ class SacUParameterServer(object):
                 continue
             sum_gradients /= len(gradients)
             output.append((sum_gradients, variable))
+        print("Parameter output: ", output)
         return output
 
     def update_parameter_variable(self, sess):

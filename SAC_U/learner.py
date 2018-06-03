@@ -37,6 +37,7 @@ class SacULearner(object):
         self.q_rets_t = None
         self.policy_grad = None
         self.assigns = dict()
+        self.parameters = None
 
     def add_trajectory(self, trajectory):
         self.trajectory_queue.put(trajectory)
@@ -54,11 +55,12 @@ class SacULearner(object):
                 with tf.variable_scope("value"):
                     value_fixed = self.value_model(self.task_id, self.action, self.state)
             parameters = policy, value, policy_fixed, value_fixed
+            self.parameters = parameters
 
             self.values_t = tf.placeholder(tf.float32, (None, len(self.action_space)))
             self.task_policy_score = -tf.reduce_sum(policy * (self.values_t - self.entropy_regularization * tf.log(policy)))
             self.q_rets_t = tf.placeholder(tf.float32, (None, 1))
-            self.q_loss_t = tf.reduce_sum(np.square(value - self.q_rets_t))
+            self.q_loss_t = tf.reduce_sum(tf.square(value - self.q_rets_t))
             self.q_loss_grads = tf.gradients(self.q_loss_t, tf.trainable_variables("current/value"))
             self.policy_grad = tf.gradients(self.task_policy_score, tf.trainable_variables("current/policy"))
 
@@ -88,8 +90,8 @@ class SacULearner(object):
                     # This is not done explicitly in the paper
                     trajectory = trajectory[np.random.randint(0, len(trajectory)-1):]
 
-                    delta_phi = self.get_delta_phi(trajectory, parameters, sess)
-                    delta_theta = self.get_delta_theta(trajectory, parameters, sess)
+                    delta_phi = self.get_delta_phi(trajectory, sess)
+                    delta_theta = self.get_delta_theta(trajectory, sess)
 
                     # The idea is that this will block until the parameter update is finished:
                     self.parameter_server.put_gradients(self.learner_index, delta_phi, delta_theta)
@@ -149,11 +151,13 @@ class SacULearner(object):
                     feed_dict[placeholder] = variable_map[var.name.replace("fixed/", "")]
         sess.run(query, feed_dict=feed_dict)
 
-    def get_delta_phi(self, trajectory, parameters, sess) -> dict:
+    def get_delta_phi(self, trajectory, sess) -> dict:
 
-        policy, value, policy_fixed, value_fixed = parameters
+        policy, value, policy_fixed, value_fixed = self.parameters
         q_rets = []
         initial_experience = trajectory[0]
+
+        # TODO: This whole part should be updated:
         for task_id in range(self.n_tasks):
 
             action_probabilities = sess.run(policy_fixed, feed_dict={
@@ -175,10 +179,20 @@ class SacULearner(object):
                 self.action: list([self.action_to_one_hot(experience[1]) for experience in trajectory])
             })
             q_deltas = avg_q_si - all_q_values
+
+            all_action_q_values = np.zeros((len(trajectory), len(self.action_space)))
+            for action in self.action_space:
+                all_action_q_values[:, action] = sess.run(value_fixed, feed_dict={
+                    self.task_id: list([task_id for experience in trajectory]),
+                    self.state: list([experience[0] for experience in trajectory]),
+                    self.action: list([self.action_to_one_hot(action) for experience in trajectory])
+                })[0]
+
             all_action_distributions = sess.run(policy_fixed, feed_dict={
                 self.task_id: list([task_id for experience in trajectory]),
                 self.state: list([experience[0] for experience in trajectory]),
             })
+            print("AAD.shape:", all_action_distributions.shape)
             all_action_probabilities = np.sum(all_action_distributions* np.array([self.action_to_one_hot(experience[1]) for experience in trajectory]), axis=1)
             all_b_action_probabilities = np.array(([experience[3][experience[1]] for experience in trajectory]))
             c = all_action_probabilities/all_b_action_probabilities
@@ -189,15 +203,28 @@ class SacULearner(object):
 
             q_ret = 0
             c_prod = 1
-            for j in range(len(trajectory)):
-                c_prod *= c[j]
+            c_reward = 0
+            print("Deltas: ", q_deltas[:10, 0])
+            #print("Reward: ", np.array([experience[2][task_id] for experience in trajectory])[:10])
+            #print("Tasks: ", np.array([experience[4] for experience in trajectory])[:10])
+
+            for j in range(len(trajectory)-1):
+                c_reward += (self.gamma**j) * rewards[j]
+                # According to the RETRACE paper j=0 should yield c_prod == 1
+                if j != 0:
+                    c_prod *= c[j]
                 #print(c_prod, c[:j])
-                q_ret += (self.gamma**j) * c_prod * (rewards[j] + q_deltas[j])
+                #print(j, len(trajectory), all_action_distributions.shape, all_action_q_values.shape)
+                expected_q_tp1 = np.sum(all_action_distributions[j+1] * all_action_q_values[j+1])
+                q_ret += c_prod * (c_reward + self.gamma**(j+1) * expected_q_tp1 - all_q_values[j])
             # TODO: Remove MC:
             #q_ret = [np.sum(rewards)]
-            q_rets.append(q_ret)
+            q_rets.append(q_ret + all_q_values[0])
 
         q_rets = np.array(q_rets)
+        print(q_rets)
+        print("Initial action: ", initial_experience[1])
+        print(self.q_loss_grads, self.q_loss_t, value)
 
         gradients, q_loss, value_v = sess.run((self.q_loss_grads, self.q_loss_t, value),
                              feed_dict={
@@ -206,8 +233,8 @@ class SacULearner(object):
                                  self.action: [self.action_to_one_hot(initial_experience[1])]*self.n_tasks,
                                  self.q_rets_t: q_rets
                              })
-        #print("Values, returns: ", value_v, q_rets)
-        #print("Q-loss: ", q_loss)
+        print("Values, returns: ", value_v, q_rets)
+        print("Q-loss: ", q_loss)
         vars = tf.trainable_variables("current/value")
         values = gradients
 
@@ -217,10 +244,10 @@ class SacULearner(object):
 
         return ret
 
-    def get_delta_theta(self, trajectory, parameters, sess) -> dict:
+    def get_delta_theta(self, trajectory, sess) -> dict:
         # TODO: Test this implementation
 
-        policy, value, policy_fixed, value_fixed = parameters
+        policy, value, policy_fixed, value_fixed = self.parameters
 
         states = np.stack([event[0] for event in trajectory[:]], axis=0)
         # print("States: ", states)
@@ -239,6 +266,7 @@ class SacULearner(object):
                     self.action: actions
                 }), (-1,))
         gradient_dict = dict()
+        print("Values: ", values)
         for task_id in range(self.n_tasks):
             query = []
             keys = []

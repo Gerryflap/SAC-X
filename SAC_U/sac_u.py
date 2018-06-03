@@ -12,7 +12,8 @@ import multiprocessing as mp
 class SacU(object):
     def __init__(self, policy_model, value_model, environment_creator, state_shape, action_space, n_tasks, n_learners,
                  learning_rate=0.0001, averaged_gradients=None, entropy_regularization_factor=0.1, n_trajectories=4,
-                 max_steps = 4000, scheduler_period=150, buffer_size=-1, visual=False):
+                 max_steps = 4000, scheduler_period=150, buffer_size=-1, visual=False, gamma=1.0):
+        self.gamma = gamma
         self.buffer_size = buffer_size
         self.entropy_regularization_factor = entropy_regularization_factor
         self.n_tasks = n_tasks
@@ -31,7 +32,7 @@ class SacU(object):
         self.actors = []
         for i in range(n_learners):
             learner = SacULearner(self.parameter_server, policy_model, value_model, entropy_regularization_factor,
-                                  state_shape, action_space, n_tasks, buffer_size=buffer_size)
+                                  state_shape, action_space, n_tasks, buffer_size=buffer_size, gamma=gamma)
             actor = SacUActor(environment_creator(), n_trajectories, max_steps, scheduler_period, state_shape, action_space,
                               n_tasks, policy_model, learner, self.parameter_server)
             self.actors.append(actor)
@@ -70,7 +71,7 @@ if __name__ == "__main__":
         x = tf.concat([x, one_hot], axis=1)
         x = ks.layers.Dense(100, activation='elu')(x)
         x = ks.layers.Dense(100, activation='elu')(x)
-        x = ks.layers.Dense(3, activation='softmax')(x)
+        x = ks.layers.Dense(2, activation='softmax')(x)
         return x
 
 
@@ -109,5 +110,5 @@ if __name__ == "__main__":
 
 
     env = lambda: wenv.GymEnvWrapper(gym.make('CartPole-v0'), lambda s, a, r: np.array([r/100]), 1)
-    sac_u = SacU(policy_model2, value_model2, env, (4,), [0,1], 1, 32, buffer_size=100, visual=True, averaged_gradients=32, learning_rate=0.0002, entropy_regularization_factor=0.01, scheduler_period=200)
+    sac_u = SacU(policy_model, value_model, env, (4,), [0,1], 1, 32, buffer_size=100, visual=True, averaged_gradients=32, learning_rate=0.000007, entropy_regularization_factor=0.8, scheduler_period=200)
     sac_u.run()
