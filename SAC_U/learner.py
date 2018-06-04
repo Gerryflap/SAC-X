@@ -83,7 +83,7 @@ class SacULearner(object):
                 self.update_replay_buffer()
 
                 # TODO: Put this back to 1000
-                for k in range(100):
+                for k in range(1000):
                     trajectory = self.replay_buffer[np.random.randint(0, len(self.replay_buffer)-1)]
 
                     # To generate a random s_i, we shorten the trajectory randomly.
@@ -97,7 +97,7 @@ class SacULearner(object):
                     self.parameter_server.put_gradients(self.learner_index, delta_phi, delta_theta)
 
                     # Update the current parameters
-                    if k != 99:
+                    if k != 999:
                         self.update_local_parameters(sess, both=False)
 
                 # Update all parameters
@@ -151,7 +151,93 @@ class SacULearner(object):
                     feed_dict[placeholder] = variable_map[var.name.replace("fixed/", "")]
         sess.run(query, feed_dict=feed_dict)
 
+    def get_qsa_values(self, states, tasks, sess):
+        """
+        Returns a numpy array of shape (len(states), len(action_space)) of Q values for every action in every state
+        :param sess: The TF session
+        :param tasks: The task to select at every state
+        :param states: The states to compute this on
+        :return: The Q-values for every action in action space for every state in states
+        """
+        policy, value, policy_fixed, value_fixed = self.parameters
+        states_long = []
+        tasks_long = []
+        actions_long = []
+        action_space_onehot = list([self.action_to_one_hot(a) for a in self.action_space])
+        for state, task_id in zip(states, tasks):
+            states_long += [state]*len(self.action_space)
+            tasks_long += [task_id] * len(self.action_space)
+            actions_long += action_space_onehot
+
+        q_values = sess.run(
+            value_fixed,
+            feed_dict={
+                self.state: states_long,
+                self.action: actions_long,
+                self.task_id: tasks_long
+            })
+        q_values = np.reshape(q_values, (-1, len(self.action_space)))
+        return q_values
+
+
+
+    def get_q_delta(self, trajectory, task_id,  sess):
+        policy, value, policy_fixed, value_fixed = self.parameters
+
+
+        q_delta = 0
+        q_values = self.get_qsa_values(
+            [e[0] for e in trajectory],
+            [task_id for e in trajectory],
+            sess
+        )
+        policies = sess.run(
+            policy_fixed,
+            feed_dict={
+                self.state: [e[0] for e in trajectory],
+                self.task_id: [task_id for e in trajectory]
+            })
+
+        all_action_probabilities = np.array([a[i] for i, a in zip([e[1] for e in trajectory], policies)])
+        all_b_action_probabilities = np.array(([experience[3][experience[1]] for experience in trajectory]))
+        c = all_action_probabilities / all_b_action_probabilities
+        # print(c.shape, all_action_probabilities.shape, all_b_action_probabilities.shape)
+        c[c > 1] = 1
+
+        c_product = 1
+        for j, (s, a, r, _, _) in enumerate(trajectory):
+            if j != len(trajectory) - 1:
+                expected_q_tp1 = np.sum(policies[j + 1] * q_values[j + 1])
+                delta = r[task_id] + self.gamma * expected_q_tp1 - q_values[j, a]
+            else:
+                delta = r[task_id] - q_values[j, a]
+            q_delta += c_product * self.gamma ** j * delta
+            c_product *= c[j]
+
+        absolute_q = q_values[0, trajectory[0][1]] + q_delta
+        return q_delta, absolute_q
+
     def get_delta_phi(self, trajectory, sess) -> dict:
+        q_returns = []
+        for task_id in range(self.n_tasks):
+            q_returns.append([self.get_q_delta(trajectory, task_id, sess)[1]])
+        gradients = sess.run(self.q_loss_grads, feed_dict={
+            self.state: [trajectory[0][0]] * self.n_tasks,
+            self.action: [self.action_to_one_hot(trajectory[0][1])] * self.n_tasks,
+            self.task_id: list(range(self.n_tasks)),
+            self.q_rets_t: q_returns
+        })
+
+        vars = tf.trainable_variables("current/value")
+        values = gradients
+
+        ret = dict()
+        for var, val in zip(vars, values):
+            ret[var.name.replace("current/", "")] = val
+        return ret
+
+
+    def get_delta_phi_old(self, trajectory, sess) -> dict:
 
         policy, value, policy_fixed, value_fixed = self.parameters
         q_rets = []

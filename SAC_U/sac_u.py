@@ -101,14 +101,14 @@ if __name__ == "__main__":
         xs = []
         for i in range(1):
             nx = ks.layers.Dense(100, activation='elu')(x)
-            xs.append(ks.layers.Dense(1, activation='linear')(nx))
+            xs.append(ks.layers.Dense(2, activation='linear')(nx))
         xs = tf.stack(xs, axis=1)
         batch_indices = tf.range(tf.shape(t_id)[0])
         selectors = tf.stack([batch_indices, t_id], axis=1)
-        return tf.gather_nd(xs, selectors)
+        return tf.reduce_sum(tf.gather_nd(xs, selectors)*action, axis=1)
 
 
 
-    env = lambda: wenv.GymEnvWrapper(gym.make('CartPole-v0'), lambda s, a, r: np.array([r/100]), 1)
-    sac_u = SacU(policy_model, value_model, env, (4,), [0,1], 1, 32, buffer_size=100, visual=True, averaged_gradients=32, learning_rate=0.000007, entropy_regularization_factor=0.8, scheduler_period=200)
+    env = lambda: wenv.GymEnvWrapper(gym.make('CartPole-v0'), lambda s, a, r: np.array([r/10]), 1)
+    sac_u = SacU(policy_model2, value_model2, env, (4,), [0,1], 1, 10, buffer_size=1000, visual=True, averaged_gradients=10, learning_rate=0.0005, entropy_regularization_factor=0.01, scheduler_period=200, gamma=0.7)
     sac_u.run()

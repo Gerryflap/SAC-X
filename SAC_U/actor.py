@@ -142,7 +142,8 @@ class SacUActor(object):
 
     def _visualize_trajectory(self, trajectory):
         entropy = np.average([np.sum(step[3] * -np.log(step[3])) for step in trajectory])
-        score = np.sum([step[2][0] for step in trajectory])
+
+        score = np.sum([step[2][0]/10 for step in trajectory])
         self.scores.append(score)
         self.entropies.append(entropy)
         plt.plot(self.scores, color='red')

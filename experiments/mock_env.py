@@ -34,8 +34,8 @@ def value_model2(t_id, action, x):
 
 def simple_policy_model(t_id, state):
     weights = tf.Variable(tf.random_normal((1,3)), name="Policy_weights")
-    constants = tf.constant([[1, 1, 1]], dtype=tf.float32) + 0 * weights
-    return tf.tile(ks.activations.softmax(constants, axis=1), [tf.shape(state)[0], 1])
+    #constants = tf.constant([[1, 1, 1]], dtype=tf.float32) + 0 * weights
+    return tf.tile(ks.activations.softmax(weights, axis=1), [tf.shape(state)[0], 1])
 
 def simple_value_model(t_id, action, x):
     weights = tf.Variable(tf.random_normal((1, 3)), name="Value_weights")
@@ -45,6 +45,6 @@ def simple_value_model(t_id, action, x):
 
 
 env = lambda: mock_env.MockEnv()
-sac_u = SacU(simple_policy_model, simple_value_model, env, (3,), mock_env.action_space, 1, 1, buffer_size=100, visual=False, averaged_gradients=1,
-             learning_rate=0.001, entropy_regularization_factor=0.0, scheduler_period=200, max_steps=1000, gamma=1.0)
+sac_u = SacU(policy_model2, value_model2, env, (3,), mock_env.action_space, 1, 1, buffer_size=100, visual=False, averaged_gradients=1,
+             learning_rate=0.01, entropy_regularization_factor=0.5, scheduler_period=200, max_steps=1000, gamma=0.5)
 sac_u.run()

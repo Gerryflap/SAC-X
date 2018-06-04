@@ -1,5 +1,5 @@
 """
-    In this file the retrace basic
+    In this file the retrace algorithm is tested (the basic Q returns without the c_k)
 """
 
 import random
