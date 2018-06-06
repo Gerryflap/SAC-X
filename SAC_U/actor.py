@@ -1,10 +1,13 @@
 """
     The SAC-U actor collects trajectories and gives them to the learner
 """
+import queue
+
 import tensorflow as tf
 import numpy as np
 import multiprocessing as mp
 import matplotlib.pyplot as plt
+
 
 class SacUActor(object):
     def __init__(self, environment, n_trajectories, max_steps, scheduler_period, state_shape, action_space, n_tasks,
@@ -38,6 +41,8 @@ class SacUActor(object):
             self.env.set_rendering(True)
             self.entropies = []
             self.scores = []
+            self.plt1 = plt.subplot(1, 2, 1)
+            self.plt2 = plt.subplot(1, 2, 2)
         self.assigns = dict()
         # Since this is SAC_U, there is no Q-table for scheduling
 
@@ -57,12 +62,12 @@ class SacUActor(object):
                 # Keep working indefinitely
                 n = 0
                 task_id = None
-                s = self.env.reset()
-                trajectory = []
-                score = None
-                while n < self.n_trajectories:
-                    self.update_local_parameters(sess)
 
+                while n < self.n_trajectories:
+                    s = self.env.reset()
+                    trajectory = []
+                    self.update_local_parameters(sess)
+                    score = None
                     # Collect a new trajectory from the environment
                     for t in range(self.max_steps):
                         if t % self.scheduler_period == 0:
@@ -76,11 +81,12 @@ class SacUActor(object):
                         a_i = self.sample_index(action_dist)
                         a = self.action_space[a_i]
 
-                        if t%100 == 0:
-                            print(task_id, action_dist)
+                        # if t%100 == 0:
+                        #     print(task_id, action_dist)
 
                         # Here we assume that the environment will provide the rewards:
                         s_new, rewards = self.env.step(a)
+
                         if score is None:
                             score = rewards
                         else:
@@ -89,15 +95,13 @@ class SacUActor(object):
                         s = s_new
                         if self.env.terminated:
                             break
-                    if self.env.terminated:
-                        break
                     n += 1
 
-                if not self.visual:
-                    #print("Sending trajectory of length", len(trajectory), "with score ", score)
-                    self.send_trajectory(trajectory)
-                else:
-                    self._visualize_trajectory(trajectory)
+                    if not self.visual:
+                        #print("Sending trajectory of length", len(trajectory), "with score ", score)
+                        self.send_trajectory(trajectory)
+                    else:
+                        self._visualize_trajectory(trajectory)
 
     @staticmethod
     def sample_index(distribution):
@@ -135,18 +139,33 @@ class SacUActor(object):
         sess.run(query, feed_dict=feed_dict)
 
     def send_trajectory(self, trajectory):
-        self.learner.add_trajectory(trajectory)
+        done = False
+        while not done:
+            try:
+                self.learner.add_trajectory(trajectory)
+                done = True
+            except queue.Full:
+                print("Sending trajectory failed")
+                pass
 
     def update_parameters(self, parameters):
-        self.parameter_queue.put(parameters)
+        done = False
+        while not done:
+            try:
+                self.parameter_queue.put(parameters, timeout=10)
+                done = True
+            except queue.Full:
+                print("Waiting parameter update")
+                pass
 
     def _visualize_trajectory(self, trajectory):
+        print(trajectory[0])
         entropy = np.average([np.sum(step[3] * -np.log(step[3])) for step in trajectory])
 
-        score = np.sum([step[2][0]/10 for step in trajectory])
+        score = np.sum([step[2][1]*10 for step in trajectory])
         self.scores.append(score)
         self.entropies.append(entropy)
-        plt.plot(self.scores, color='red')
-        plt.plot(self.entropies, color='blue')
+        self.plt1.plot(self.scores, color='red')
+        self.plt2.plot(self.entropies, color='blue')
         plt.pause(0.05)
 

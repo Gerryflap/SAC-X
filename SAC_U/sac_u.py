@@ -53,11 +53,16 @@ class SacU(object):
             p1.start()
         try:
             self.parameter_server.run()
-        except Exception:
+        except (KeyboardInterrupt, Exception):
             # Main process killed, terminate all subprocess
             traceback.print_exc()
+            print("Terminating processes: ")
             for process in processes:
                 process.terminate()
+                print("Waiting for process: ", process.name)
+                process.join()
+                print("Terminated")
+
 
 if __name__ == "__main__":
     import tensorflow as tf
@@ -110,5 +115,5 @@ if __name__ == "__main__":
 
 
     env = lambda: wenv.GymEnvWrapper(gym.make('CartPole-v0'), lambda s, a, r: np.array([r/10]), 1)
-    sac_u = SacU(policy_model2, value_model2, env, (4,), [0,1], 1, 10, buffer_size=1000, visual=True, averaged_gradients=10, learning_rate=0.0005, entropy_regularization_factor=0.01, scheduler_period=200, gamma=0.7)
+    sac_u = SacU(policy_model2, value_model2, env, (4,), [0,1], 1, 10, buffer_size=1000, visual=True, averaged_gradients=10, learning_rate=0.0001, entropy_regularization_factor=0.1, scheduler_period=200, gamma=0.7, max_steps=100)
     sac_u.run()

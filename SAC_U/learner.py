@@ -58,7 +58,7 @@ class SacULearner(object):
             self.parameters = parameters
 
             self.values_t = tf.placeholder(tf.float32, (None, len(self.action_space)))
-            self.task_policy_score = -tf.reduce_sum(policy * (self.values_t - self.entropy_regularization * tf.log(policy)))
+            self.task_policy_score = -tf.reduce_sum(policy * (self.values_t + self.entropy_regularization * tf.log(policy)))
             self.q_rets_t = tf.placeholder(tf.float32, (None, 1))
             self.q_loss_t = tf.reduce_sum(tf.square(value - self.q_rets_t))
             self.q_loss_grads = tf.gradients(self.q_loss_t, tf.trainable_variables("current/value"))
@@ -308,9 +308,9 @@ class SacULearner(object):
             q_rets.append(q_ret + all_q_values[0])
 
         q_rets = np.array(q_rets)
-        print(q_rets)
-        print("Initial action: ", initial_experience[1])
-        print(self.q_loss_grads, self.q_loss_t, value)
+        #print(q_rets)
+        #print("Initial action: ", initial_experience[1])
+        #print(self.q_loss_grads, self.q_loss_t, value)
 
         gradients, q_loss, value_v = sess.run((self.q_loss_grads, self.q_loss_t, value),
                              feed_dict={
@@ -319,8 +319,8 @@ class SacULearner(object):
                                  self.action: [self.action_to_one_hot(initial_experience[1])]*self.n_tasks,
                                  self.q_rets_t: q_rets
                              })
-        print("Values, returns: ", value_v, q_rets)
-        print("Q-loss: ", q_loss)
+        #print("Values, returns: ", value_v, q_rets)
+        #print("Q-loss: ", q_loss)
         vars = tf.trainable_variables("current/value")
         values = gradients
 
@@ -352,7 +352,7 @@ class SacULearner(object):
                     self.action: actions
                 }), (-1,))
         gradient_dict = dict()
-        print("Values: ", values)
+        #print("Values: ", values)
         for task_id in range(self.n_tasks):
             query = []
             keys = []
