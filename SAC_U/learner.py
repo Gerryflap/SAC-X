@@ -58,7 +58,7 @@ class SacULearner(object):
             self.parameters = parameters
 
             self.values_t = tf.placeholder(tf.float32, (None, len(self.action_space)))
-            self.task_policy_score = -tf.reduce_sum(policy * (self.values_t + self.entropy_regularization * tf.log(policy)))
+            self.task_policy_score = -tf.reduce_sum(policy * (self.values_t - self.entropy_regularization * tf.log(policy)))
             self.q_rets_t = tf.placeholder(tf.float32, (None, 1))
             self.q_loss_t = tf.reduce_sum(tf.square(value - self.q_rets_t))
             self.q_loss_grads = tf.gradients(self.q_loss_t, tf.trainable_variables("current/value"))
@@ -238,6 +238,7 @@ class SacULearner(object):
 
 
     def get_delta_phi_old(self, trajectory, sess) -> dict:
+        # THIS METHOD IS DEPRECATED
 
         policy, value, policy_fixed, value_fixed = self.parameters
         q_rets = []
