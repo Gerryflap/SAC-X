@@ -51,7 +51,7 @@ def value_model2(t_id, action, x):
     return tf.gather_nd(xs, selectors)
 
 
-env = lambda: wenv.GymEnvWrapper(gym.make('MountainCar-v0'), lambda s, a, r: np.array([r / 1000, np.square(s[1])/10]), 2)
+env = lambda: wenv.GymEnvWrapper(gym.make('MountainCar-v0'), lambda s, a, r: np.array([r / 1000, np.abs(s[1])*10]), 2)
 sac_u = SacU(policy_model2, value_model2, env, (2,), [0, 1, 2], 2, 10, buffer_size=1000, visual=True, averaged_gradients=10,
-             learning_rate=0.0003, entropy_regularization_factor=3.0, scheduler_period=200, gamma=1.0)
+             learning_rate=0.00001, entropy_regularization_factor=3.0, scheduler_period=200, gamma=1.0)
 sac_u.run()
