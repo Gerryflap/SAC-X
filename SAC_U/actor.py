@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 class SacUActor(object):
     def __init__(self, environment, n_trajectories, max_steps, scheduler_period, state_shape, action_space, n_tasks,
-                 policy_model, learner, parameter_server, visual=False):
+                 policy_model, learner, parameter_server, visual=False, trajectory_listeners=None):
         """
         Initializes the learner
         :param n_trajectories: Number of trajectories to be collected before submitting to learner.
@@ -20,9 +20,12 @@ class SacUActor(object):
         :param state_shape: The shape of the state variable (does not include batch dimension)
         :param action_space: The actions space, should be a list of objects that represent each action
         :param n_tasks: Number of tasks, both auxiliary and external
-        :param policy_model: The policy model: takes taskID, observation (in batch);
-            returns a |action_space| sized probability distribution
+        :param policy_model: The policy model: takes taskID, observation (both in batch);
+            returns a |action_space| sized probability distribution (in batch)
         """
+        if trajectory_listeners is None:
+            trajectory_listeners = []
+        self.trajectory_listeners = trajectory_listeners
         self.n_trajectories = n_trajectories  # N_trajectories
         self.max_steps = max_steps  # T
         self.scheduler_period = scheduler_period  # Xi
@@ -81,12 +84,8 @@ class SacUActor(object):
                         a_i = self.sample_index(action_dist)
                         a = self.action_space[a_i]
 
-                        # if t%100 == 0:
-                        #     print(task_id, action_dist)
-
                         # Here we assume that the environment will provide the rewards:
                         s_new, rewards = self.env.step(a)
-
 
                         if score is None:
                             score = rewards[:]
@@ -141,6 +140,9 @@ class SacUActor(object):
         sess.run(query, feed_dict=feed_dict)
 
     def send_trajectory(self, trajectory):
+        for listener in self.trajectory_listeners:
+            listener.put_trajectory(trajectory)
+
         done = False
         while not done:
             try:

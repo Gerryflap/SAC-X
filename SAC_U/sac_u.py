@@ -12,7 +12,11 @@ import multiprocessing as mp
 class SacU(object):
     def __init__(self, policy_model, value_model, environment_creator, state_shape, action_space, n_tasks, n_learners,
                  learning_rate=0.0001, averaged_gradients=None, entropy_regularization_factor=0.1, n_trajectories=4,
-                 max_steps = 4000, scheduler_period=150, buffer_size=-1, visual=False, gamma=1.0):
+                 max_steps = 4000, scheduler_period=150, buffer_size=-1, visual=False, gamma=1.0,
+                 trajectory_listeners=None):
+        if trajectory_listeners is None:
+            trajectory_listeners = []
+        self.trajectory_listeners = trajectory_listeners
         self.gamma = gamma
         self.buffer_size = buffer_size
         self.entropy_regularization_factor = entropy_regularization_factor
@@ -34,14 +38,16 @@ class SacU(object):
             learner = SacULearner(self.parameter_server, policy_model, value_model, entropy_regularization_factor,
                                   state_shape, action_space, n_tasks, buffer_size=buffer_size, gamma=gamma)
             actor = SacUActor(environment_creator(), n_trajectories, max_steps, scheduler_period, state_shape, action_space,
-                              n_tasks, policy_model, learner, self.parameter_server)
+                              n_tasks, policy_model, learner, self.parameter_server, trajectory_listeners=trajectory_listeners)
             self.actors.append(actor)
             self.learners.append(learner)
             self.parameter_server.add_learner(learner)
             self.parameter_server.add_actor(actor)
         if visual:
             actor = SacUActor(environment_creator(), n_trajectories, max_steps, scheduler_period, state_shape, action_space,
-                              n_tasks, policy_model, None, self.parameter_server, visual=True)
+                              n_tasks, policy_model, None, self.parameter_server, visual=True,
+                              trajectory_listeners=trajectory_listeners
+                              )
             self.actors.append(actor)
             self.parameter_server.add_actor(actor)
 
@@ -51,6 +57,10 @@ class SacU(object):
             p1 = mp.Process(target=process.run)
             processes.append(p1)
             p1.start()
+
+        for listener in self.trajectory_listeners:
+            processes.append(listener)
+            listener.start()
         try:
             self.parameter_server.run()
         except (KeyboardInterrupt, Exception):
@@ -70,6 +80,7 @@ if __name__ == "__main__":
     import environments.wrapper_env as wenv
     import gym
     import numpy as np
+    from utility.avg_score_entropy_trajectory_listener import AvgScoreEntropyTrajectoryListener
 
     def policy_model(t_id, x):
         one_hot = tf.one_hot(t_id, 2)
@@ -112,8 +123,24 @@ if __name__ == "__main__":
         selectors = tf.stack([batch_indices, t_id], axis=1)
         return tf.reduce_sum(tf.gather_nd(xs, selectors)*action, axis=1)
 
-
-
+    listeners = [AvgScoreEntropyTrajectoryListener(10, [0], ['red'])]
     env = lambda: wenv.GymEnvWrapper(gym.make('CartPole-v0'), lambda s, a, r: np.array([r/10]), 1)
-    sac_u = SacU(policy_model2, value_model2, env, (4,), [0,1], 1, 10, buffer_size=1000, visual=True, averaged_gradients=10, learning_rate=0.0001, entropy_regularization_factor=0.1, scheduler_period=200, gamma=0.7, max_steps=100)
+    sac_u = SacU(
+        policy_model2,      # Policy neural net
+        value_model2,       # Value neural net
+        env,                # Environment creator function
+        (4,),               # State shape
+        [0,1],              # Action space
+        1,                  # Number of tasks
+        10,                 # Number of learners/actors
+        buffer_size=1000,
+        visual=False,
+        averaged_gradients=10,
+        learning_rate=0.0001,
+        entropy_regularization_factor=0.01,
+        scheduler_period=200,
+        gamma=0.7,
+        max_steps=100,
+        trajectory_listeners=listeners
+    )
     sac_u.run()
