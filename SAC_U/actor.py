@@ -88,7 +88,7 @@ class SacUActor(object):
                         s_new, rewards = self.env.step(a)
 
                         if score is None:
-                            score = rewards[:]
+                            score = np.array(rewards, copy=True)
                         else:
                             score += rewards
                         trajectory.append((s, a_i, rewards, action_dist, task_id))
@@ -166,7 +166,7 @@ class SacUActor(object):
         print(trajectory[:10])
         entropy = np.average([np.sum(step[3] * -np.log(step[3])) for step in trajectory])
 
-        score = np.sum([step[2][1]*10 for step in trajectory])
+        score = np.sum([step[2][0]*10 for step in trajectory])
         self.scores.append(score)
         self.entropies.append(entropy)
         self.plt1.plot(self.scores, color='red')
