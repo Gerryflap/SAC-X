@@ -2,6 +2,7 @@
     The SAC-U actor collects trajectories and gives them to the learner and trajectory listeners
 """
 import queue
+import time
 
 import tensorflow as tf
 import numpy as np
@@ -24,7 +25,7 @@ class SacUActor(object):
         :param learner: The Learner attached to this actor, visual actors don't use a learner
         :param parameter_server: The central parameter server
         :param visual: A boolean flag that can enable visual mode.
-            In visual mode the actor will render the environment at ~60 fps
+            In visual mode the actor will render the environment
         :param trajectory_listeners: A list of trajectory listeners.
             Trajectory Listeners will receive the trajectories for monitoring purposes
         """
@@ -44,6 +45,7 @@ class SacUActor(object):
         self.parameter_server = parameter_server
         self.parameter_queue = mp.Queue()
         self.visual = visual
+        self.env.render = self.visual
         self.assigns = dict()
         self.policy = None
         # Since this is SAC_U, there is no Q-table for scheduling
@@ -96,6 +98,7 @@ class SacUActor(object):
 
                     # Collect the new state and reward vector from the environment
                     s_new, rewards = self.env.step(a)
+
 
                     # Append the experience to the trajectory
                     trajectory.append((s, a_i, rewards, action_dist, task_id))
@@ -178,4 +181,5 @@ class SacUActor(object):
             except queue.Full:
                 print("Waiting parameter update")
                 pass
+
 

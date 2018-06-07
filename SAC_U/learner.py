@@ -142,13 +142,15 @@ class SacULearner(object):
                         self.update_local_parameters(sess, both=False)
 
                 # Update all parameters
-                print("Updating all parameters")
                 self.update_local_parameters(sess, both=True)
-                print("Done updating all variables")
-
                 n += 1
 
     def action_to_one_hot(self, action_index):
+        """
+        Converts an action to a one-hot vector with length |action_space|
+        :param action_index: The index of the action in the one-hot vector
+        :return: The one-hot vector as numpy array
+        """
         v = np.zeros((len(self.action_space,)))
         v[action_index] = 1
         return v
@@ -158,58 +160,84 @@ class SacULearner(object):
         Updates the replay buffer with incoming replays from the actor
         """
         while self.trajectory_queue.qsize() > 0:
-            print("Queue not empty: receiving trajectories")
+            # While the queue is not empty: receive trajectories...
             trajectory = self.trajectory_queue.get()
+
+            # ... and add them to the memory
             self.replay_buffer.append(trajectory)
 
             # Remove the first trajectory if the buffer is full:
-            print(self.buffer_size, len(self.replay_buffer))
             if self.buffer_size != -1 and len(self.replay_buffer) > self.buffer_size:
                 self.replay_buffer.pop(0)
-            print("Updated replay buffer, size: ", len(self.replay_buffer))
-        print(self.trajectory_queue.empty(), self.trajectory_queue.qsize())
 
     def update_local_parameters(self, sess, both=False):
+        """
+        Updates the local (to this learner) parameters using the parameters received from the server.
+        This method blocks until parameters have been received,
+            but will gladly take more parameters if available to get the most recent ones.
+        :param sess: The TF session
+        :param both: If set to True: updates both fixed and live/current networks
+        """
 
+        # Get a map of (variable name -> value) from the server
         variable_map = self.parameter_queue.get()
+
+        # Or more if we're behind:
         while not self.parameter_queue.empty():
             variable_map = self.parameter_queue.get()
 
         # Construct a "query" of reassignments to run on the session
         feed_dict = dict()
         query = []
+
+        # Loop over all local variables in the "current" scope
         for var in self.assigns.keys():
+
+            # If the variable map contains this value,
+            #   append this assignment to the query
             if var.name.replace("current/", "") in variable_map:
-                assign_op, placeholder= self.assigns[var]
+
+                # Get the TF assignment operator and new value placeholder from the dict
+                assign_op, placeholder = self.assigns[var]
+
+                # Add the assignment to the query
                 query.append(assign_op)
+
+                # Add the new value to the feed dict for the respective placeholder
                 feed_dict[placeholder] = variable_map[var.name.replace("current/", "")]
-                #query.append(tf.assign(var, variable_map[var.name.replace("current/", "")]))
+
         if both:
+            # Do the same for the fixed variables:
             for var in self.assigns.keys():
                 if var.name.replace("fixed/", "") in variable_map:
                     assign_op, placeholder = self.assigns[var]
                     query.append(assign_op)
                     feed_dict[placeholder] = variable_map[var.name.replace("fixed/", "")]
+
+        # Run the query on the session
         sess.run(query, feed_dict=feed_dict)
 
     def get_qsa_values(self, states, tasks, sess):
         """
-        Returns a numpy array of shape (len(states), len(action_space)) of Q values for every action in every state
+        Returns a numpy array of shape (len(states), len(action_space)) of (fixed) Q values for every action in every state
         :param sess: The TF session
         :param tasks: The task to select at every state
         :param states: The states to compute this on
-        :return: The Q-values for every action in action space for every state in states
+        :return: The (fixed) Q-values for every action in action space for every state in states
         """
         policy, value, policy_fixed, value_fixed = self.parameters
         states_long = []
         tasks_long = []
         actions_long = []
         action_space_onehot = list([self.action_to_one_hot(a) for a in self.action_space])
+
+        # Create a long batch of every possible combination of state and action
         for state, task_id in zip(states, tasks):
             states_long += [state]*len(self.action_space)
             tasks_long += [task_id] * len(self.action_space)
             actions_long += action_space_onehot
 
+        # Get the Q-values
         q_values = sess.run(
             value_fixed,
             feed_dict={
@@ -217,21 +245,33 @@ class SacULearner(object):
                 self.action: actions_long,
                 self.task_id: tasks_long
             })
+
+        # Reshape the outcome
         q_values = np.reshape(q_values, (-1, len(self.action_space)))
         return q_values
 
-
-
     def get_q_delta(self, trajectory, task_id,  sess):
+        """
+        Calculate the Q-delta according to the Retrace algorithm
+            (the implementation is based on the Retrace paper, not the SAC-X paper)
+        :param trajectory: The trajectory to calculate the delta on
+        :param task_id: The task_id to calculate the delta for
+        :param sess: The TF session
+        :return: (The Q delta, the target q-value)
+            Here the target q-value is the fixed q-values + the q-delta
+        """
         policy, value, policy_fixed, value_fixed = self.parameters
 
-
+        # Initialize the q_delta variable and get all Qsa values for the trajectory
         q_delta = 0
         q_values = self.get_qsa_values(
             [e[0] for e in trajectory],
             [task_id for e in trajectory],
             sess
         )
+
+        # Calculate all values of π(* | state, task_id) for the trajectory for out current task
+        #   (using the fixed network)
         policies = sess.run(
             policy_fixed,
             feed_dict={
@@ -239,29 +279,62 @@ class SacULearner(object):
                 self.task_id: [task_id for e in trajectory]
             })
 
+        # Pick all π(a_t | state, task_id) from π(* | state, task_id) for every action taken in the trajectory
         all_action_probabilities = np.array([a[i] for i, a in zip([e[1] for e in trajectory], policies)])
+
+        # Pick all b(a_t | state, B) from the trajectory
         all_b_action_probabilities = np.array(([experience[3][experience[1]] for experience in trajectory]))
+
+        # Calculate the value of c_k for the whole trajectory
         c = all_action_probabilities / all_b_action_probabilities
-        # print(c.shape, all_action_probabilities.shape, all_b_action_probabilities.shape)
+
+        # Make sure that c is capped on 1, so c_k = min(1, c_k)
         c[c > 1] = 1
 
+        # Keep the product of c_k values in a variable
         c_product = 1
+
+        # Iterate over the trajectory to calculate the expected returns
         for j, (s, a, r, _, _) in enumerate(trajectory):
+
+            # Check if we're at the end of the trajectory
             if j != len(trajectory) - 1:
+                # If we're not: calculate the next difference and use the Q for j+1 as well
+
+                # The Expected value of the Q(s_j+1, *) under the policy
                 expected_q_tp1 = np.sum(policies[j + 1] * q_values[j + 1])
+
+                # The delta for this lookahead
                 delta = r[task_id] + self.gamma * expected_q_tp1 - q_values[j, a]
             else:
+                # If this is the last entry, we'll assume the Q(s_j+1, *) to be fixed on 0 as the state is terminal
                 delta = r[task_id] - q_values[j, a]
+
+            # Add this to the sum of q_deltas, where the term is multiplied by gamma and delta
             q_delta += c_product * self.gamma ** j * delta
+
+            # Multiply the c_product with the next c-value,
+            #   this makes any move done after a "dumb" move (according to our policy) less significant
             c_product *= c[j]
 
+        # Calculate the new "correct" Q-value for this s,a
         absolute_q = q_values[0, trajectory[0][1]] + q_delta
         return q_delta, absolute_q
 
     def get_delta_phi(self, trajectory, sess) -> dict:
+        """
+        Calculate the gradients for phi
+        :param trajectory: A trajectory to calulate the values for
+        :param sess: The TF session
+        :return: A gradient dictionary
+        """
         q_returns = []
+
+        # Get the new Q-values for every task
         for task_id in range(self.n_tasks):
             q_returns.append([self.get_q_delta(trajectory, task_id, sess)[1]])
+
+        # Calculate the gradients:
         gradients = sess.run(self.q_loss_grads, feed_dict={
             self.state: [trajectory[0][0]] * self.n_tasks,
             self.action: [self.action_to_one_hot(trajectory[0][1])] * self.n_tasks,
@@ -269,6 +342,8 @@ class SacULearner(object):
             self.q_rets_t: q_returns
         })
 
+
+        # Put the gradients in a dict:
         vars = tf.trainable_variables("current/value")
         values = gradients
 
@@ -277,100 +352,6 @@ class SacULearner(object):
             ret[var.name.replace("current/", "")] = val
         return ret
 
-
-    def get_delta_phi_old(self, trajectory, sess) -> dict:
-        # THIS METHOD IS DEPRECATED
-
-        policy, value, policy_fixed, value_fixed = self.parameters
-        q_rets = []
-        initial_experience = trajectory[0]
-
-        # TODO: This whole part should be updated:
-        for task_id in range(self.n_tasks):
-
-            action_probabilities = sess.run(policy_fixed, feed_dict={
-                self.task_id: [task_id],
-                self.state: [initial_experience[0]]
-            })[0]
-            q_values = sess.run(value_fixed, feed_dict={
-                self.task_id: [task_id]*len(self.action_space),
-                self.state: [initial_experience[0]]*len(self.action_space),
-                self.action: list([self.action_to_one_hot(a) for a in self.action_space])
-            })
-            q_values = np.reshape(q_values, (-1,))
-            # The expected value of Q(s_i, . , T) over the policy distribution for s_i
-            avg_q_si = np.sum(action_probabilities*q_values)
-
-            all_q_values = sess.run(value_fixed, feed_dict={
-                self.task_id: list([task_id for experience in trajectory]),
-                self.state: list([experience[0] for experience in trajectory]),
-                self.action: list([self.action_to_one_hot(experience[1]) for experience in trajectory])
-            })
-            q_deltas = avg_q_si - all_q_values
-
-            all_action_q_values = np.zeros((len(trajectory), len(self.action_space)))
-            for action in self.action_space:
-                all_action_q_values[:, action] = sess.run(value_fixed, feed_dict={
-                    self.task_id: list([task_id for experience in trajectory]),
-                    self.state: list([experience[0] for experience in trajectory]),
-                    self.action: list([self.action_to_one_hot(action) for experience in trajectory])
-                })[0]
-
-            all_action_distributions = sess.run(policy_fixed, feed_dict={
-                self.task_id: list([task_id for experience in trajectory]),
-                self.state: list([experience[0] for experience in trajectory]),
-            })
-            print("AAD.shape:", all_action_distributions.shape)
-            all_action_probabilities = np.sum(all_action_distributions* np.array([self.action_to_one_hot(experience[1]) for experience in trajectory]), axis=1)
-            all_b_action_probabilities = np.array(([experience[3][experience[1]] for experience in trajectory]))
-            c = all_action_probabilities/all_b_action_probabilities
-            #print(c.shape, all_action_probabilities.shape, all_b_action_probabilities.shape)
-            c[c>1] = 1
-
-            rewards = np.array([experience[2][task_id] for experience in trajectory])
-
-            q_ret = 0
-            c_prod = 1
-            c_reward = 0
-            print("Deltas: ", q_deltas[:10, 0])
-            #print("Reward: ", np.array([experience[2][task_id] for experience in trajectory])[:10])
-            #print("Tasks: ", np.array([experience[4] for experience in trajectory])[:10])
-
-            for j in range(len(trajectory)-1):
-                c_reward += (self.gamma**j) * rewards[j]
-                # According to the RETRACE paper j=0 should yield c_prod == 1
-                if j != 0:
-                    c_prod *= c[j]
-                #print(c_prod, c[:j])
-                #print(j, len(trajectory), all_action_distributions.shape, all_action_q_values.shape)
-                expected_q_tp1 = np.sum(all_action_distributions[j+1] * all_action_q_values[j+1])
-                q_ret += c_prod * (c_reward + self.gamma**(j+1) * expected_q_tp1 - all_q_values[j])
-            # TODO: Remove MC:
-            #q_ret = [np.sum(rewards)]
-            q_rets.append(q_ret + all_q_values[0])
-
-        q_rets = np.array(q_rets)
-        #print(q_rets)
-        #print("Initial action: ", initial_experience[1])
-        #print(self.q_loss_grads, self.q_loss_t, value)
-
-        gradients, q_loss, value_v = sess.run((self.q_loss_grads, self.q_loss_t, value),
-                             feed_dict={
-                                 self.task_id: list(range(self.n_tasks)),
-                                 self.state: [initial_experience[0]]*self.n_tasks,
-                                 self.action: [self.action_to_one_hot(initial_experience[1])]*self.n_tasks,
-                                 self.q_rets_t: q_rets
-                             })
-        #print("Values, returns: ", value_v, q_rets)
-        #print("Q-loss: ", q_loss)
-        vars = tf.trainable_variables("current/value")
-        values = gradients
-
-        ret = dict()
-        for var, val in zip(vars, values):
-            ret[var.name.replace("current/", "")] = val
-
-        return ret
 
     def get_delta_theta(self, trajectory, sess) -> dict:
         # TODO: Test this implementation

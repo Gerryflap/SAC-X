@@ -100,10 +100,10 @@ if __name__ == "__main__":
         return x
 
     def policy_model2(t_id, x):
-        x = ks.layers.Dense(10, activation='elu')(x)
+        x = ks.layers.Dense(40, activation='elu')(x)
         xs = []
         for i in range(1):
-            nx = ks.layers.Dense(10, activation='elu')(x)
+            nx = ks.layers.Dense(40, activation='elu')(x)
             xs.append(ks.layers.Dense(2, activation='softmax')(nx))
         xs = tf.stack(xs, axis=1)
         batch_indices = tf.range(tf.shape(t_id)[0])
@@ -113,10 +113,10 @@ if __name__ == "__main__":
 
     def value_model2(t_id, action, x):
         x = tf.concat([x, action], axis=1)
-        x = ks.layers.Dense(10, activation='elu')(x)
+        x = ks.layers.Dense(40, activation='elu')(x)
         xs = []
         for i in range(1):
-            nx = ks.layers.Dense(10, activation='elu')(x)
+            nx = ks.layers.Dense(40, activation='elu')(x)
             xs.append(ks.layers.Dense(2, activation='linear')(nx))
         xs = tf.stack(xs, axis=1)
         batch_indices = tf.range(tf.shape(t_id)[0])
@@ -124,7 +124,7 @@ if __name__ == "__main__":
         return tf.reduce_sum(tf.gather_nd(xs, selectors)*action, axis=1)
 
     listeners = [AvgScoreEntropyTrajectoryListener(200, [0], ['red'])]
-    env = lambda: wenv.GymEnvWrapper(gym.make('CartPole-v0'), lambda s, a, r: np.array([r/100]), 1)
+    env = lambda: wenv.GymEnvWrapper(gym.make('CartPole-v0'), lambda s, a, r: np.array([r/1]), 1)
     sac_u = SacU(
         policy_model2,      # Policy neural net
         value_model2,       # Value neural net
@@ -133,11 +133,11 @@ if __name__ == "__main__":
         [0,1],              # Action space
         1,                  # Number of tasks
         5,                 # Number of learners/actors
-        buffer_size=10000,
-        visual=False,
+        buffer_size=1000,
+        visual=True,
         averaged_gradients=5,
         learning_rate=2e-4,
-        entropy_regularization_factor=0.0005,
+        entropy_regularization_factor=0.05,
         scheduler_period=200,
         gamma=0.3,
         max_steps=100,
