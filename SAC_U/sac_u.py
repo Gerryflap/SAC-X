@@ -124,7 +124,7 @@ if __name__ == "__main__":
         return tf.reduce_sum(tf.gather_nd(xs, selectors)*action, axis=1)
 
     listeners = [AvgScoreEntropyTrajectoryListener(200, [0], ['red'])]
-    env = lambda: wenv.GymEnvWrapper(gym.make('CartPole-v0'), lambda s, a, r: np.array([r/1]), 1)
+    env = lambda: wenv.GymEnvWrapper(gym.make('CartPole-v0'), lambda s, a, r: np.array([r]), 1)
     sac_u = SacU(
         policy_model2,      # Policy neural net
         value_model2,       # Value neural net
@@ -132,15 +132,14 @@ if __name__ == "__main__":
         (4,),               # State shape
         [0,1],              # Action space
         1,                  # Number of tasks
-        5,                 # Number of learners/actors
-        buffer_size=1000,
+        3,                 # Number of learners/actors
+        buffer_size=10000,
         visual=True,
-        averaged_gradients=5,
-        learning_rate=2e-4,
-        entropy_regularization_factor=0.05,
+        averaged_gradients=3,
+        learning_rate=0.0001,
+        entropy_regularization_factor=0.1,
         scheduler_period=200,
-        gamma=0.3,
-        max_steps=100,
+        gamma=0.9,
         trajectory_listeners=listeners
     )
     sac_u.run()

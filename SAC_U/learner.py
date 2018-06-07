@@ -38,7 +38,8 @@ class SacULearner(object):
         self.parameter_server = parameter_server
         self.policy_model = policy_model
         self.value_model = value_model
-        self.entropy_regularization = entropy_regularization
+        # Scale the term to account for the fact that TensorFlow can only do Ln(x) and not Log2(x)
+        self.entropy_regularization = entropy_regularization/np.log(2)
         self.buffer_size = buffer_size
         self.training_iterations = training_iterations
         self.trajectory_queue = mp.Queue(500)

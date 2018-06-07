@@ -15,6 +15,6 @@ class MockEnv(object):
     def step(self, action):
         rewards = np.zeros((n_tasks, ))
         if action == 0:
-            rewards[0] = 1
+            rewards[0] = 10
         return np.random.normal(0, 1, state_shape), rewards
 

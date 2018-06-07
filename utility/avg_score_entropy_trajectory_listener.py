@@ -29,7 +29,7 @@ class AvgScoreEntropyTrajectoryListener(TrajectoryListener):
 
     def process_trajectory(self, trajectory):
         reward_sum = np.sum([r for _, _, r, _, _ in trajectory], axis=0)
-        entropy_mean = np.mean([np.sum(-p * np.log(p)) for _, _, _, p, _ in trajectory])
+        entropy_mean = np.mean([np.sum(-p * np.log2(p)) for _, _, _, p, _ in trajectory])
         self.entropies.append(entropy_mean)
         self.scores.append(reward_sum)
 
