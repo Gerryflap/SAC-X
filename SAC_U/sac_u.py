@@ -123,7 +123,7 @@ if __name__ == "__main__":
         selectors = tf.stack([batch_indices, t_id], axis=1)
         return tf.reduce_sum(tf.gather_nd(xs, selectors)*action, axis=1)
 
-    listeners = [AvgScoreEntropyTrajectoryListener(10, [0], ['red'])]
+    listeners = [AvgScoreEntropyTrajectoryListener(200, [0], ['red'])]
     env = lambda: wenv.GymEnvWrapper(gym.make('CartPole-v0'), lambda s, a, r: np.array([r/10]), 1)
     sac_u = SacU(
         policy_model2,      # Policy neural net
@@ -132,12 +132,12 @@ if __name__ == "__main__":
         (4,),               # State shape
         [0,1],              # Action space
         1,                  # Number of tasks
-        10,                 # Number of learners/actors
+        5,                 # Number of learners/actors
         buffer_size=1000,
         visual=False,
-        averaged_gradients=10,
-        learning_rate=0.0001,
-        entropy_regularization_factor=0.01,
+        averaged_gradients=5,
+        learning_rate=0.0005,
+        entropy_regularization_factor=0.1,
         scheduler_period=200,
         gamma=0.7,
         max_steps=100,

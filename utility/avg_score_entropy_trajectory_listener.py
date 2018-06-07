@@ -32,20 +32,21 @@ class AvgScoreEntropyTrajectoryListener(TrajectoryListener):
         entropy_mean = np.mean([np.sum(-p * np.log(p)) for _, _, _, p, _ in trajectory])
         self.entropies.append(entropy_mean)
         self.scores.append(reward_sum)
-        if len(self.scores) > self.n:
-            self.scores.pop(0)
-            self.entropies.pop(0)
-        score_avg = np.mean(self.scores, axis=0)
-        entropy_avg = np.mean(self.entropies)
 
-        self.avg_scores.append(score_avg)
-        self.avg_entropies.append(entropy_avg)
+        if len(self.scores) == self.n:
+            score_avg = np.mean(self.scores, axis=0)
+            entropy_avg = np.mean(self.entropies)
 
-        avg_scores = np.array(self.avg_scores)
+            self.avg_scores.append(score_avg)
+            self.avg_entropies.append(entropy_avg)
 
-        self.plt1.clear()
-        self.plt2.clear()
-        for task_id, colour in zip(self.task_ids, self.colours):
-            self.plt1.plot(avg_scores[:, task_id], color=colour)
-        self.plt2.plot(self.avg_entropies)
-        plt.pause(0.05)
+            avg_scores = np.array(self.avg_scores)
+
+            self.plt1.clear()
+            self.plt2.clear()
+            for task_id, colour in zip(self.task_ids, self.colours):
+                self.plt1.plot(avg_scores[:, task_id], color=colour)
+            self.plt2.plot(self.avg_entropies)
+            plt.pause(0.05)
+            self.scores = []
+            self.entropies = []
