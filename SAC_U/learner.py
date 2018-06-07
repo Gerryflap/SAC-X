@@ -12,6 +12,27 @@ import multiprocessing as mp
 class SacULearner(object):
     def __init__(self, parameter_server, policy_model, value_model, entropy_regularization, state_shape, action_space,
                  n_tasks, learner_index=-1, buffer_size=-1, training_iterations=-1, gamma=1):
+        """
+        Initializes a SAC-U Learner
+        :param parameter_server: The central parameter server
+        :param policy_model: The policy model: takes taskIDs, observations (both in batch);
+            returns a |action_space| sized probability distribution (in batch)
+        :param value_model: The value model: takes taskIDs, actions (one hot) and observations in batch;
+            returns a (-1, 1) shaped Tensor (where the -1 is flexible depending on the input length) of q-values.
+        :param entropy_regularization: The entropy regularization factor as described in equation 9 in the paper;
+            Do note that the paper uses "+ α * log π(a | s_t, T)" whereas this implementation uses
+            - α * log π(a | s_t, T) because it makes more sense in my opinion.
+            A higher α in this implementation keeps the entropy higher.
+        :param state_shape: The shape of the state variable (does not include batch dimension)
+        :param action_space: The actions space, should be a list of objects that represent each action
+        :param n_tasks: Number of tasks, both auxiliary and external
+        :param learner_index: The index of the learner, currently not really used.
+        :param buffer_size: The size of the replay buffer (in trajectories)
+        :param training_iterations: Number of training iterations the actor has to perform. -1 denotes infinitely long
+        :param gamma: The discount factor γ, should be between 0 and 1.
+            γ = 0 makes the agent only care about immediate rewards.
+            γ = 1 makes every action "responsible" for all future rewards, even if they happened very far in the future
+        """
 
         self.learner_index = learner_index
         self.parameter_server = parameter_server
@@ -40,15 +61,22 @@ class SacULearner(object):
         self.parameters = None
 
     def add_trajectory(self, trajectory):
+        # This method is used by the actors to add trajectories
         self.trajectory_queue.put(trajectory)
 
     def run(self):
+
+        # Initialize the TF session
         with tf.Session() as sess:
+
+            # Build "live"/"current" policy and value networks
             with tf.variable_scope("current"):
                 with tf.variable_scope("policy"):
                     policy = self.policy_model(self.task_id, self.state)
                 with tf.variable_scope("value"):
                     value = self.value_model(self.task_id, self.action, self.state)
+
+            # Build "fixed" target networks for policy and value
             with tf.variable_scope("fixed"):
                 with tf.variable_scope("policy"):
                     policy_fixed = self.policy_model(self.task_id, self.state)
@@ -57,13 +85,24 @@ class SacULearner(object):
             parameters = policy, value, policy_fixed, value_fixed
             self.parameters = parameters
 
+            # A tensor that holds the q-values for every action in the action_space, used for policy loss
             self.values_t = tf.placeholder(tf.float32, (None, len(self.action_space)))
+
+            # The policy score. Since Adam uses gradient descend, the score is inverted to make it a loss function.
             self.task_policy_score = -tf.reduce_sum(policy * (self.values_t - self.entropy_regularization * tf.log(policy)))
+
+            # The q-returns placeholder,
+            #   holds the expected future rewards that the value network has to be optimized towards
             self.q_rets_t = tf.placeholder(tf.float32, (None, 1))
+
+            # The MSE loss function for optimizing the value network
             self.q_loss_t = tf.reduce_sum(tf.square(value - self.q_rets_t))
+
+            # The TF Ops for retrieving the gradients
             self.q_loss_grads = tf.gradients(self.q_loss_t, tf.trainable_variables("current/value"))
             self.policy_grad = tf.gradients(self.task_policy_score, tf.trainable_variables("current/policy"))
 
+            # Create assign placeholders for assigning the variables TODO: using tf.Variable.load is better
             for var in tf.trainable_variables():
                 placeholder = tf.placeholder(tf.float32, var.shape)
                 self.assigns[var] = (tf.assign(var, placeholder), placeholder)
@@ -73,16 +112,16 @@ class SacULearner(object):
 
             n = 0
 
-            # Wait until the first trajectories appear if the buffer is empty
-            while len(self.replay_buffer) <= 1:
+            # Wait until the first 10 trajectories appear if the buffer is empty
+            while len(self.replay_buffer) <= 10:
                 self.update_replay_buffer()
                 time.sleep(0.1)
 
             while n < self.training_iterations or self.training_iterations == -1:
-                print("Updating replay buffer: ")
+                # Receive trajectories from the Learner
                 self.update_replay_buffer()
 
-                # TODO: Put this back to 1000
+                # Calculate 1000 gradients without updating the target networks
                 for k in range(1000):
                     trajectory = self.replay_buffer[np.random.randint(0, len(self.replay_buffer)-1)]
 
@@ -90,13 +129,15 @@ class SacULearner(object):
                     # This is not done explicitly in the paper
                     trajectory = trajectory[np.random.randint(0, len(trajectory)-1):]
 
+                    # Calculate the gradients that have to be supplied to the parameter server
                     delta_phi = self.get_delta_phi(trajectory, sess)
                     delta_theta = self.get_delta_theta(trajectory, sess)
 
-                    # The idea is that this will block until the parameter update is finished:
+                    # Push the gradients to the parameter server
                     self.parameter_server.put_gradients(self.learner_index, delta_phi, delta_theta)
 
                     # Update the current parameters
+                    #   (unless it is the last iteration, then quit the loop and update both fixed and current networks)
                     if k != 999:
                         self.update_local_parameters(sess, both=False)
 

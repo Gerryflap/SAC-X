@@ -137,9 +137,9 @@ if __name__ == "__main__":
         visual=False,
         averaged_gradients=5,
         learning_rate=2e-4,
-        entropy_regularization_factor=0.05,
+        entropy_regularization_factor=0.0005,
         scheduler_period=200,
-        gamma=0.9,
+        gamma=0.3,
         max_steps=100,
         trajectory_listeners=listeners
     )
